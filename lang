@@ -1,0 +1,49 @@
+// (for later) each module has an interface, one gets generated if it doesnt exist, based on exported decls
+// entry point is called "entry"
+
+PRIMITIVES: type : target [ params ]
+	integer		-> intN, uintN N=8,32,64
+	floating-point	-> floatN, N=32,64,80
+	pointer		-> T *, T * $ T.sentinel
+	(slice		-> T {*})
+	array 		-> T [N]
+	function	-> func funcparams : R
+	// make it so that fptr is appf: func**[13](x:int32,y:int32):int32
+	(boolean)
+	(unit)
+
+funcparams : (a1: T1, a2: T2, ...)
+
+OPS:
+	postfix		-> x[i], x(a), x.f
+	prefix		-> @x, +x, -x, &x, ~x, !x
+	in-multiply	-> x*y, x/y, x%y, x*%y
+	in-shift	-> x>>y, x<<y
+	in-bit-and	-> x&y
+	in-bit-or	-> x|y, x^y
+	in-add		-> x+y, x-y, x+%y, x-%y
+	in-log-and	-> x&&y
+	in-log-or	-> x||y
+	in-cast		-> x:T
+
+	// x,y,a expr
+	// f name
+	// T type
+
+	assign		-> = *= /= %= >>= <<= &= |= ^= += -= +%= -%= *%=
+
+DECLS:	var-decl  : 'decl' name non-function-type '=' value ';'
+	func-decl : 'decl' name     function-type stamement-block ';' // OO-decls
+	struct-decl : 'struct' name '{' var-decl+ '}'
+	union-decl  : 'union' name '{' var-decl+ '}'
+	alias_t : 'alias' name ':' type ';' // strong alias // alias(#weak), alias(#strong)
+	alias_v : 'alias' name '=' value ';'
+
+STMTS:  expr ';'
+	expr assign-op expr ';'
+	decl
+	'if' expr stmt [ 'else' stmt ]
+	'while' expr stmt
+	'for' stmt-assign-or-decl expr ';' stmt-assign stmt
+	statement-block : '{' stmt* '}'
+
