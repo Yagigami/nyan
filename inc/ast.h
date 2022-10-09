@@ -49,7 +49,7 @@ struct type_t;
 
 typedef struct type_t {
 	union {
-		map_entry name;
+		ident_t name;
 		struct {
 			// func_arg array
 			scratch_arr params;
@@ -60,14 +60,14 @@ typedef struct type_t {
 } type_t;
 
 typedef struct {
-	map_entry name;
+	ident_t name;
 	type_t type;
 } func_arg;
 
 typedef struct expr {
 	union {
 		uint64_t value;
-		map_entry name;
+		ident_t name;
 		struct {
 			struct expr *operand;
 			scratch_arr args; // array of expr*
@@ -85,12 +85,12 @@ typedef scratch_arr stmt_block; // array of stmt
 typedef struct decl {
 	union {
 		struct {
-			map_entry name;
+			ident_t name;
 			type_t *type;
 			expr init;
 		} var_d;
 		struct {
-			map_entry name;
+			ident_t name;
 			type_t *type;
 			stmt_block body;
 		} func_d;

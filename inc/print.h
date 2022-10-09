@@ -36,7 +36,7 @@ typedef enum {
 static_assert(P_END < (1<<PRINTABLE_SHIFT), "increase PRINTABLE_SHIFT");
 #define FMT(x) (_Generic((x), \
 			char*: P_STRING, \
-			map_entry : P_KEYWORD, \
+			ident_t : P_KEYWORD, \
 			token : P_TOKEN, \
 			token_kind : P_TOKEN_KIND \
 			))

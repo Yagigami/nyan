@@ -10,16 +10,27 @@
 #include "dynarr.h"
 
 
+// strong typedef
+typedef struct { uintptr_t _repr; } ident_t;
+
+ident_t ident_from(map_entry e);
+size_t ident_len(ident_t i);
+const uint8_t *ident_str(ident_t i);
+
 typedef struct {
 	const uint8_t *start;
 	uint64_t len: 56;
 	uint64_t kind: 8;
-	union { map_entry processed; uint64_t value; };
+	union { ident_t processed; uint64_t value; };
 } token;
 
 typedef enum {
 	TOKEN_END = '\0',
-	TOKEN_ERR = 1,
+
+	TOKEN_ERR_BEGIN = 1,
+	TOKEN_ERR_LONG_NAME,
+	TOKEN_ERR_END = TOKEN_ERR_LONG_NAME,
+
 	TOKEN_ASCII_DELIM = 128,
 	TOKEN_NAME,
 	TOKEN_KEYWORD,
@@ -39,7 +50,7 @@ extern struct global_token_state {
 	map map;
 	dyn_arr line_marks;
 	allocator_geom names;
-	map_entry kw_decl,
+	ident_t kw_decl,
 		     kw_func,
 		     kw_int32,
 		     kw_return;
@@ -54,9 +65,9 @@ void token_advance(void);
 bool token_is(token_kind k);
 bool token_match(token_kind k);
 bool token_expect(token_kind k);
-bool token_is_kw(map_entry kw);
-bool token_match_kw(map_entry kw);
-bool token_expect_kw(map_entry kw);
+bool token_is_kw(ident_t kw);
+bool token_match_kw(ident_t kw);
+bool token_expect_kw(ident_t kw);
 bool token_match_precedence(token_kind p);
 void token_unexpected(void);
 const uint8_t *token_at(void);

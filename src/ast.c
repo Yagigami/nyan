@@ -103,7 +103,7 @@ void parse_type_params(dyn_arr *p)
 	while (!token_match(')')) {
 		if (i++ && !token_expect(',')) return;
 		if (!token_expect(TOKEN_NAME)) return;
-		map_entry name = tokens.current.processed;
+		ident_t name = tokens.current.processed;
 		if (!token_expect(':')) return;
 		type_t type = parse_type();
 		func_arg a = { name, type };
@@ -194,7 +194,7 @@ decl parse_decl(void)
 {
 	if (token_match_kw(tokens.kw_decl)) {
 		if (!token_expect(TOKEN_NAME)) goto err;
-		map_entry name = tokens.current.processed;
+		ident_t name = tokens.current.processed;
 		type_t t = parse_type();
 		if (t.kind == TYPE_FUNC) {
 			stmt_block body = parse_stmt_block();
@@ -244,6 +244,6 @@ void test_ast(void)
 	allocator_geom_fini(&tokens.names);
 	DEALLOC(ast.general, decls);
 	ast_fini();
-	printf("  no news is good news.\n");
+	if (!ast.errors) printf("  no news is good news.\n");
 }
 

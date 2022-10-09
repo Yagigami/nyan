@@ -10,11 +10,13 @@ static int fprint_token(FILE *to, token tk)
 {
 	switch (tk.kind) {
 	case TOKEN_NAME:
-		return fprintf(to, "n'%.*s'", (int) tk.processed.v, (char*) tk.processed.k);
+		return fprintf(to, "n'%.*s'", (int) ident_len(tk.processed), (char*) ident_str(tk.processed));
 	case TOKEN_KEYWORD:
-		return fprintf(to, "k'%.*s'", (int) tk.processed.v, (char*) tk.processed.k);
+		return fprintf(to, "k'%.*s'", (int) ident_len(tk.processed), (char*) ident_str(tk.processed));
 	case TOKEN_INT:
 		return fprintf(to, "#%lu", tk.value);
+	case TOKEN_ERR_LONG_NAME:
+		return fprintf(to, "`%.*s` (too long with %zu characters)", (int) tk.len, (char*) tk.start, (size_t) tk.len);
 	default:
 		return isprint(tk.kind) ?
 			fprintf(to, "'%c'", tk.kind) :
@@ -36,9 +38,9 @@ static int fprint_token_kind(FILE *to, token_kind k)
 	}
 }
 
-static int fprint_keyword(FILE *to, map_entry e)
+static int fprint_keyword(FILE *to, ident_t e)
 {
-	return fprintf(to, "'%.*s'", (int) e.v, (char*) e.k);
+	return fprintf(to, "'%.*s'", (int) ident_len(e), (char*) ident_str(e));
 }
 
 int _print_impl(FILE *to, const uint8_t *at, uint64_t bitmap, ...)
@@ -60,7 +62,7 @@ int _print_impl(FILE *to, const uint8_t *at, uint64_t bitmap, ...)
 		printed += fprint_token_kind(to, va_arg(args, token_kind));
 		break;
 	case P_KEYWORD:
-		printed += fprint_keyword(to, va_arg(args, map_entry));
+		printed += fprint_keyword(to, va_arg(args, ident_t));
 		break;
 	default:
 		__builtin_unreachable();

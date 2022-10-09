@@ -8,6 +8,8 @@ decl entry func(): int32
 
 decl cap func(): int32
 {
-	return 6;
+	decl this_name_is_ok_ int32 = 6;
+	decl y int32 = this_name_is_ok_;
+	return y;
 }
 
