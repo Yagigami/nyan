@@ -1,4 +1,5 @@
 #include "ast.h"
+#include "scope.h"
 #include "print.h"
 
 #include <assert.h>
@@ -236,6 +237,11 @@ void test_ast(void)
 	printf("==AST==\n");
 	ast_init(&malloc_allocator, 0x1000, 28);
 	decls_t decls = parse_module("cr/basic.cr");
+	scope global;
+	resolve_init(ast.general, 1);
+	resolve_refs(decls, &global);
+	resolve_fini();
+
 	dyn_arr_fini(&tokens.line_marks);
 	map_fini(&tokens.map);
 	allocator_geom_fini(&tokens.names);
