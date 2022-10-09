@@ -1,7 +1,8 @@
 // (for later) each module has an interface, one gets generated if it doesnt exist, based on exported decls
 // entry point is called "entry"
 
-PRIMITIVES: type : target [ params ]
+PRIMITIVES: type : primit target* [ params ]
+	boolean		-> bool
 	integer		-> intN, uintN N=8,32,64
 	floating-point	-> floatN, N=32,64,80
 	pointer		-> T *, T * $ T.sentinel
@@ -33,7 +34,7 @@ OPS:
 	assign		-> = *= /= %= >>= <<= &= |= ^= += -= +%= -%= *%=
 
 DECLS:	var-decl  : 'decl' name non-function-type '=' value ';'
-	func-decl : 'decl' name     function-type stamement-block ';' // OO-decls
+	func-decl : 'decl' name     function-type stamement-block // OO-decls
 	struct-decl : 'struct' name '{' var-decl+ '}'
 	union-decl  : 'union' name '{' var-decl+ '}'
 	alias_t : 'alias' name ':' type ';' // strong alias // alias(#weak), alias(#strong)
@@ -46,4 +47,5 @@ STMTS:  expr ';'
 	'while' expr stmt
 	'for' stmt-assign-or-decl expr ';' stmt-assign stmt
 	statement-block : '{' stmt* '}'
+	'return' expr ';'
 

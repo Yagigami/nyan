@@ -1,4 +1,5 @@
 #include "token.h"
+#include "ast.h"
 #include "print.h"
 #include "file.h"
 
