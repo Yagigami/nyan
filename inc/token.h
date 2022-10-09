@@ -10,10 +10,9 @@
 #include "dynarr.h"
 
 
-// strong typedef
-typedef struct { uintptr_t _repr; } ident_t;
+typedef uintptr_t ident_t;
 
-ident_t ident_from(map_entry e);
+ident_t ident_from(const uint8_t *start, size_t len);
 size_t ident_len(ident_t i);
 const uint8_t *ident_str(ident_t i);
 

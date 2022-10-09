@@ -8,9 +8,10 @@
 
 // k is nonnull on a valid kay, and null on a sentinel key
 // v can be anything
+typedef uintptr_t key_t, val_t;
 typedef struct {
-	void *k;
-	uintmax_t v;
+	key_t k;
+	val_t v;
 } map_entry;
 
 typedef struct {
@@ -22,11 +23,10 @@ typedef struct {
 int map_init(map *map, allocator *a, size_t cap);
 void map_fini(map *map);
 
-typedef size_t (*map_hash)(map_entry e);
-typedef int (*map_cmp)(map_entry L, map_entry R);
-typedef map_entry (*map_insert)(map_entry e);
-map_entry map_id(map *map, map_entry e, map_hash hash, map_cmp cmp,
-		map_insert insert);
+typedef size_t (*map_hash)(key_t k);
+typedef int (*map_cmp)(key_t L, key_t R);
+typedef key_t (*map_insert)(key_t k);
+map_entry *map_id(map *map, key_t k, map_hash hash, map_cmp cmp, map_insert insert);
 
 #endif /* CROUTE_MAP_H */
 

@@ -20,95 +20,106 @@ void map_fini(map *map)
 	DEALLOC(map->a, map->m);
 }
 
-void map_rehash_if_needed(map *map, map_hash hash)
+map_entry *map_rehash_if_needed(map *map, map_entry *watch, map_hash hash)
 {
 	size_t cap = map->m.len/sizeof(map_entry);
-	if (map->cnt < cap/2) return;
+	if (map->cnt < cap/2) return watch;
 	size_t growth_factor = 2;
-	allocation m = ALLOC(map->a, growth_factor*map->m.len, 16);
-	if (!m.addr) return;
+	size_t size_after = map->cnt * sizeof(map_entry);
+	size_t new_size = growth_factor*map->m.len;
+	if (new_size < size_after) new_size = size_after;
+	allocation m = ALLOC(map->a, new_size, 16);
+	assert(m.addr);
+	if (!m.addr) return NULL;
 	memset(m.addr, 0, m.len);
 	size_t new_cap = m.len/sizeof(map_entry);
 	for (map_entry *e = map->m.addr; e != map->m.addr+map->m.len; e++) {
 		if (!e->k) continue;
-		size_t h = hash(*e);
+		size_t h = hash(e->k);
 		map_entry *new_e;
 		for (size_t i=h%new_cap;; i = (i+1) % new_cap) {
 			new_e = m.addr + i*sizeof *new_e;
 			if (!new_e->k) break;
 		}
 		*new_e = *e;
+		if (e == watch) watch = new_e;
 	}
 	DEALLOC(map->a, map->m);
 	map->m = m;
+	return watch;
 }
 
-map_entry map_id(map *map, map_entry add, map_hash hash, map_cmp cmp,
-		map_insert insert)
+map_entry *map_id(map *map, key_t k, map_hash hash, map_cmp cmp, map_insert insert)
 {
-	size_t h = hash(add);
+	size_t h = hash(k);
 	size_t cap = map->m.len / sizeof(map_entry);
 	for (size_t i=h%cap;; i = (i+1) % cap) {
 		map_entry *e = map->m.addr + i*sizeof *e;
 		if (!e->k) {
-			map_entry r = *e = insert(add);
+			e->k = insert(k);
 			map->cnt++;
-			map_rehash_if_needed(map, hash);
-			return r;
+			return map_rehash_if_needed(map, e, hash);
 		}
-		if (hash(*e) != h) continue;
-		if (cmp(*e, add) != 0) continue;
-		return *e;
+		if (hash(e->k) != h) continue;
+		if (cmp(e->k, k) != 0) continue;
+		return e;
 	}
 }
 
 
-static size_t test_hash(map_entry e);
-static int test_cmp(map_entry L, map_entry R);
-static map_entry test_insert(map_entry e);
+static size_t test_hash(key_t e);
+static int test_cmp(key_t L, key_t R);
+static key_t test_insert(key_t e);
 
 void test_map(void)
 {
 	map m;
 	int e = map_init(&m, &malloc_allocator, 2);
 	assert(e == 0);
-	map_entry a  = map_id(&m, (map_entry){"aaa",3}, test_hash, test_cmp, test_insert);
-	map_entry b  = map_id(&m, (map_entry){"bbbbb",5}, test_hash, test_cmp, test_insert);
-	map_entry a2 = map_id(&m, (map_entry){"aaa",3}, test_hash, test_cmp, test_insert);
-	map_entry c  = map_id(&m, (map_entry){"c",1}, test_hash, test_cmp, test_insert);
-	map_entry b2 = map_id(&m, (map_entry){"bbbbb",5}, test_hash, test_cmp, test_insert);
-	map_entry a3 = map_id(&m, (map_entry){"aaa",3}, test_hash, test_cmp, test_insert);
-	assert(a.k == a2.k && a.k == a3.k && a.v == 3);
-	assert(b.k == b2.k && b.v == 5);
+	map_entry *pa  = map_id(&m, (uintptr_t) "aaa", test_hash, test_cmp, test_insert);
+	pa->v = 3;
+	map_entry a = *pa;
+	map_entry *pb  = map_id(&m, (uintptr_t) "bbbbb", test_hash, test_cmp, test_insert);
+	pb->v = 5;
+	map_entry b = *pb;
+	map_entry *pa2 = map_id(&m, (uintptr_t) "aaa", test_hash, test_cmp, test_insert);
+	map_entry a2 = *pa2;
+	map_entry *pc  = map_id(&m, (uintptr_t) "c", test_hash, test_cmp, test_insert);
+	pc->v = 1;
+	map_entry c = *pc;
+	map_entry *pb2 = map_id(&m, (uintptr_t) "bbbbb", test_hash, test_cmp, test_insert);
+	map_entry b2 = *pb2;
+	map_entry *pa3 = map_id(&m, (uintptr_t) "aaa", test_hash, test_cmp, test_insert);
+	map_entry a3 = *pa3;
+	assert(a.k == a2.k && a.k == a3.k && a3.v == 3);
+	assert(b.k == b2.k && b2.v == 5);
 	assert(c.v == 1);
 	map_fini(&m);
 }
 
-size_t test_hash(map_entry e)
+size_t test_hash(key_t k)
 {
 	size_t h = 0xb3b1ece231aUL;
-	for (const char *c = e.k; *c; c++) {
+	for (const char *c = (char*) k; *c; c++) {
 		h = (h * (0x1b2dc189UL + *c)) ^ ((h % 0x429db790f) << ((*c - 32) & 63));
 	}
 	return h;
 }
 
-int test_cmp(map_entry L, map_entry R)
+int test_cmp(key_t L, key_t R)
 {
-	const char *lc = L.k, *lr = R.k;
+	const char *lc = (char*) L, *lr = (char*) R;
 	while (*lc && *lc == *lr) lc++, lr++;
 	return *lc - *lr;
 }
 
-map_entry test_insert(map_entry e)
+key_t test_insert(key_t k)
 {
+	const char *src = (char*) k;
+	size_t len = strlen(src);
 	allocator *a = &malloc_allocator;
-	size_t len = 0;
-	for (const char *c=e.k; *c; c++) len++;
 	allocation m = ALLOC(a, len, 1);
-	const char *src=e.k;
-	for (char *dst=m.addr; dst != m.addr+m.len; ) *dst++ = *src++;
-	map_entry r = { .k=m.addr, .v=m.len };
-	return r;
+	memcpy(m.addr, src, len+1);
+	return (uintptr_t) m.addr;
 }
 

@@ -45,7 +45,8 @@ int token_init(const char *path, allocator *up)
 		assert(!e);
 		e = dyn_arr_init(&tokens.line_marks, 2*sizeof(map_entry), up);
 		assert(!e);
-		map_entry empty = { .k=(void*)tokens.base, .v=(intptr_t)(tokens.base+tokens.len) };
+		// maybe use a different type at some point lol, it never goes in a map
+		map_entry empty = { .k=(intptr_t)tokens.base, .v=(intptr_t)(tokens.base+tokens.len) };
 		e = dyn_arr_push(&tokens.line_marks, &empty, sizeof empty);
 		assert(!e);
 		#define KW(kw) do {\
@@ -187,36 +188,37 @@ void test_token(void)
 	allocator_geom_fini(&tokens.names);
 }
 
-static size_t string_hash(map_entry e)
+static size_t string_hash(key_t k)
 {
 	size_t h = 0;
-	for (const uint8_t *c=e.k; *c; c++) h = h*15 ^ (*c * h);
+	const uint8_t *start = ident_str(k), *end = start + ident_len(k);
+	for (const uint8_t *c=start; c != end; c++) h = h*15 ^ (*c * h);
 	return h;
 }
 
-static int string_cmp(map_entry L, map_entry R)
+static int string_cmp(key_t L, key_t R)
 {
-	if (L.v != R.v) return L.v - R.v;
-	const char *lc=L.k, *rc=R.k, *lend = L.k+L.v;
+	if (ident_len(L) != ident_len(R)) return ident_len(L) - ident_len(R);
+	const uint8_t *lc=ident_str(L), *rc=ident_str(R), *lend = lc + ident_len(L);
 	for (; lc != lend; lc++, rc++) {
 		if (*lc != *rc) return *lc - *rc;
 	}
 	return 0;
 }
 
-static map_entry string_insert(map_entry from)
+static key_t string_insert(key_t from)
 {
-	allocation m = ALLOC(&tokens.names.base, from.v, 1);
+	allocation m = ALLOC(&tokens.names.base, ident_len(from), 1);
 	assert(m.addr);
-	memcpy(m.addr, from.k, from.v);
-	map_entry to = { .k=m.addr, .v=from.v };
-	return to;
+	memcpy(m.addr, ident_str(from), ident_len(from));
+	return ident_from(m.addr, ident_len(from));
 }
 
 ident_t intern_string(const uint8_t *start, size_t len)
 {
-	map_entry e = { .k=(void*)start, .v=len };
-	return ident_from(map_id(&tokens.map, e, string_hash, string_cmp, string_insert));
+	map_entry *r = map_id(&tokens.map, ident_from(start, len), string_hash, string_cmp, string_insert);
+	assert(r);
+	return r->k;
 }
 
 static bool ident_equals(ident_t L, ident_t R);
@@ -287,14 +289,14 @@ void token_skip_to_newline(void)
 	} while (from == find_line(token_at()));
 }
 
-size_t ident_len(ident_t i) { return (i._repr & IDENT_LEN_MASK) + 1; }
-const uint8_t *ident_str(ident_t i) { return (uint8_t*)(i._repr >> IDENT_SHIFT); }
+size_t ident_len(ident_t i) { return (i & IDENT_LEN_MASK) + 1; }
+const uint8_t *ident_str(ident_t i) { return (uint8_t*)(i >> IDENT_SHIFT); }
 bool ident_in_range(ident_t chk, const void *L, const void *R) { return L <= (void*) ident_str(chk) && (void*) ident_str(chk) <= R; }
-bool ident_equals(ident_t L, ident_t R) { return L._repr == R._repr; }
+bool ident_equals(ident_t L, ident_t R) { return L == R; }
 
-ident_t ident_from(map_entry e)
+ident_t ident_from(const uint8_t *start, size_t len)
 {
-	size_t lenm1 = e.v - 1;
+	size_t lenm1 = len-1;
 	assert((lenm1 & ~IDENT_LEN_MASK) == 0 && "identifier too long or 0-length");
-	return (ident_t){ ._repr=((uintptr_t)e.k << IDENT_SHIFT) | lenm1 };
+	return ((uintptr_t)start << IDENT_SHIFT) | lenm1;
 }
