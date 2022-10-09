@@ -24,7 +24,7 @@ void dyn_arr_fini(dyn_arr *v)
 static int dyn_arr_resize_if_needed(dyn_arr *v, size_t size)
 {
 	size_t size_after = (v->len + 1)*size;
-	if (size_after < v->buf.len) return 0;
+	if (size_after <= v->buf.len) return 0;
 	int e = -1;
 	size_t growth_factor = 2;
 	size_t new_size = growth_factor * v->buf.len;
@@ -49,4 +49,8 @@ fail:
 }
 
 
+scratch_arr scratch_from(dyn_arr *v, size_t size)
+{
+	return v->buf = REALLOC(v->a, v->buf, v->len*size, 8);
+}
 

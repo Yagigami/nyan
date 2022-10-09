@@ -49,7 +49,7 @@ int token_init(const char *path, allocator *up)
 			} while (0)
 		KW(decl);
 		KW(func);
-		KW(int);
+		KW(int32);
 		KW(return);
 		#undef KW
 
@@ -89,7 +89,7 @@ again:
 		break;
 	case 'A' ... 'Z': case 'a' ... 'z': case '_':
 		next.kind = TOKEN_NAME;
-		while (isalpha(*at) || *at == '_') at++;
+		while (isalpha(*at) || isdigit(*at) || *at == '_') at++;
 		next.processed = intern_string(next.start, at-next.start);
 		if (tokens.kw_begin <= next.processed.k && next.processed.k <= tokens.kw_end)
 			next.kind = TOKEN_KEYWORD;
@@ -143,7 +143,7 @@ bool token_match(token_kind k)
 
 const uint8_t *token_at(void)
 {
-	return &tokens.lookahead.start[tokens.lookahead.len];
+	return tokens.lookahead.start;
 }
 
 bool token_expect(token_kind k)
@@ -154,6 +154,7 @@ bool token_expect(token_kind k)
 		// fprintf(stderr, "error, expected token %d, got %d `%.*s`.\n", k, tokens.current.kind,
 				// (int) tokens.current.len, (const char*)&tokens.current.start);
 		ast.errors++;
+		token_skip_to_newline();
 	}
 	return r;
 }
@@ -233,6 +234,7 @@ bool token_expect_kw(map_entry kw)
 		// fprintf(stderr, "expected keyword %.*s, got token %d `%.*s` instead.\n",
 				// (int) kw.v, (char*) kw.k, tokens.current.kind, (int) tokens.current.len, tokens.current.start);
 		ast.errors++;
+		token_skip_to_newline();
 	}
 	return r;
 }
@@ -240,10 +242,38 @@ bool token_expect_kw(map_entry kw)
 bool token_match_precedence(token_kind p)
 {
 	assert(0 <= p && p < sizeof token_precedence/sizeof *token_precedence);
-	return token_precedence[tokens.lookahead.kind] == p;
+	bool r = token_precedence[tokens.lookahead.kind] == p;
+	if (r) token_advance();
+	return r;
 }
 
 void token_unexpected(void)
 {
 	print(stderr, token_at(), "unexpected token ", tokens.current, "\n");
+	token_skip_to_newline();
+}
+
+size_t find_line(const uint8_t *at)
+{
+	const map_entry *arr = tokens.line_marks.buf.addr;
+	size_t L = 0, R = tokens.line_marks.len;
+	size_t M;
+	while (true) {
+		M = (L+R)/2;
+		if (at < (uint8_t*)arr[M].k)
+			R = M;
+		else if (at > (uint8_t*)arr[M].v)
+			L = M;
+		else
+			break;
+	}
+	return M;
+}
+
+void token_skip_to_newline(void)
+{
+	size_t from = find_line(token_at());
+	do {
+		token_advance();
+	} while (from == find_line(token_at()));
 }

@@ -24,6 +24,7 @@ typedef enum {
 	TOKEN_NAME,
 	TOKEN_KEYWORD,
 	TOKEN_INT,
+	TOKEN_CALL,
 
 	TOKEN_NUM
 } token_kind;
@@ -40,7 +41,7 @@ extern struct global_token_state {
 	allocator_geom names;
 	map_entry kw_decl,
 		     kw_func,
-		     kw_int,
+		     kw_int32,
 		     kw_return;
 	const void *kw_begin, *kw_end;
 } tokens;
@@ -59,6 +60,8 @@ bool token_expect_kw(map_entry kw);
 bool token_match_precedence(token_kind p);
 void token_unexpected(void);
 const uint8_t *token_at(void);
+size_t find_line(const uint8_t *at);
+void token_skip_to_newline(void);
 
 
 #endif /* CROUTE_TOKEN_H */

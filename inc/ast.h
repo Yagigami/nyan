@@ -38,6 +38,7 @@ typedef enum {
 	EXPR_NONE,
 	EXPR_INT,
 	EXPR_NAME,
+	EXPR_CALL,
 	EXPR_BINARY,
 } expr_kind;
 
@@ -51,7 +52,7 @@ typedef struct type_t {
 		map_entry name;
 		struct {
 			// func_arg array
-			dyn_arr params;
+			scratch_arr params;
 			struct type_t *ret_t;
 		} func_t;
 	};
@@ -68,6 +69,10 @@ typedef struct expr {
 		uint64_t value;
 		map_entry name;
 		struct {
+			struct expr *operand;
+			scratch_arr args; // array of expr*
+		} call;
+		struct {
 			struct expr *L, *R;
 			token_kind op;
 		} binary;
@@ -75,7 +80,7 @@ typedef struct expr {
 	expr_kind kind;
 } expr;
 
-typedef dyn_arr stmt_block; // array of stmt
+typedef scratch_arr stmt_block; // array of stmt
 
 typedef struct decl {
 	union {
@@ -102,7 +107,7 @@ typedef struct stmt {
 	stmt_kind kind;
 } stmt;
 
-typedef dyn_arr decls_t; // array of decl
+typedef scratch_arr decls_t; // array of decl
 
 extern struct ast_state_t
 {

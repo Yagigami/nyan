@@ -6,32 +6,15 @@
 #include <ctype.h>
 
 
-static size_t find_line(const uint8_t *at)
-{
-	const map_entry *arr = tokens.line_marks.buf.addr;
-	size_t L = 0, R = tokens.line_marks.len;
-	size_t M;
-	while (true) {
-		M = (L+R)/2;
-		if (at < (uint8_t*)arr[M].k)
-			R = M;
-		else if (at > (uint8_t*)arr[M].v)
-			L = M;
-		else
-			break;
-	}
-	return M;
-}
-
 static int fprint_token(FILE *to, token tk)
 {
 	switch (tk.kind) {
 	case TOKEN_NAME:
-		return fprintf(to, "name('%.*s')", (int) tk.processed.v, (char*) tk.processed.k);
+		return fprintf(to, "n'%.*s'", (int) tk.processed.v, (char*) tk.processed.k);
 	case TOKEN_KEYWORD:
-		return fprintf(to, "keyword('%.*s')", (int) tk.processed.v, (char*) tk.processed.k);
+		return fprintf(to, "k'%.*s'", (int) tk.processed.v, (char*) tk.processed.k);
 	case TOKEN_INT:
-		return fprintf(to, "int(%lu)", tk.value);
+		return fprintf(to, "#%lu", tk.value);
 	default:
 		return isprint(tk.kind) ?
 			fprintf(to, "'%c'", tk.kind) :
@@ -49,7 +32,7 @@ static int fprint_token_kind(FILE *to, token_kind k)
 	case TOKEN_INT:
 		return fprintf(to, "<int>");
 	default:
-		return fprintf(to, "'%c' (%d)", k, k);
+		return  fprintf(to, isprint(k)? "'%c'": "(%d)", k);
 	}
 }
 

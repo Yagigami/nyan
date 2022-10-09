@@ -17,5 +17,9 @@ void dyn_arr_fini(dyn_arr *v);
 
 int dyn_arr_push(dyn_arr *v, void *addr, size_t size);
 
+// if the allocator is known from outside
+typedef allocation scratch_arr;
+scratch_arr scratch_from(dyn_arr *v, size_t size);
+
 #endif /* CROUTE_DYNARR_H */
 

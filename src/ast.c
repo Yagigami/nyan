@@ -1,4 +1,5 @@
 #include "ast.h"
+#include "print.h"
 
 #include <assert.h>
 #include <string.h>
@@ -24,6 +25,7 @@ static decl parse_decl(void);
 
 static expr parse_expr(void);
 static expr parse_expr_atom(void);
+static expr parse_expr_call(void);
 static expr parse_expr_add(void);
 
 static type_t parse_type(void);
@@ -58,11 +60,29 @@ err:;
 	return r;
 }
 
+expr parse_expr_call(void)
+{
+	expr operand = parse_expr_atom();
+	while (true) if (token_match('(')) {
+		dyn_arr args;
+		dyn_arr_init(&args, 0*sizeof(expr), &ast.node_a.base);
+		while (!token_match(')')) {
+			assert(0 && "not implemented");
+		}
+		expr *dup = DUP(&ast.node_a.base, operand);
+		operand.kind = EXPR_CALL;
+		operand.call.operand = dup;
+		operand.call.args = scratch_from(&args, sizeof(expr));
+	} else break;
+	return operand;
+}
+
 expr parse_expr_add(void)
 {
-	expr L = parse_expr_atom();
+	expr L = parse_expr_call();
 	if (token_match_precedence('+')) {
 		token_kind kind = tokens.current.kind;
+		assert(kind == '+' || kind == '-');
 		expr R = parse_expr_add();
 		expr e = { .kind=EXPR_BINARY,
 			   .binary={ DUP(&ast.node_a.base, L), DUP(&ast.node_a.base, R), kind }};
@@ -82,7 +102,6 @@ void parse_type_params(dyn_arr *p)
 	size_t i=0;
 	while (!token_match(')')) {
 		if (i++ && !token_expect(',')) return;
-		// map_entry name = tokens.current.processed;
 		if (!token_expect(TOKEN_NAME)) return;
 		map_entry name = tokens.current.processed;
 		if (!token_expect(':')) return;
@@ -97,8 +116,11 @@ type_kind parse_type_prim(void)
 {
 	if (token_match_kw(tokens.kw_func))
 		return TYPE_FUNC;
-	if (token_match_kw(tokens.kw_int))
+	if (token_match_kw(tokens.kw_int32))
 		return TYPE_PRIMITIVE;
+	print(stderr, token_at(), "unknown type ", tokens.lookahead, "\n");
+	ast.errors++;
+	token_skip_to_newline();
 	return TYPE_NONE;
 }
 
@@ -113,17 +135,17 @@ type_t parse_type(void)
 	type_t t = { .kind=k };
 	t = parse_type_target(t);
 	if (k == TYPE_FUNC) {
-		int e = dyn_arr_init(&t.func_t.params, 1*sizeof(func_arg), &ast.node_a.base);
+		dyn_arr params;
+		int e = dyn_arr_init(&params, 0*sizeof(func_arg), &ast.node_a.base);
 		assert(!e);
-		parse_type_params(&t.func_t.params);
+		parse_type_params(&params);
+		t.func_t.params = scratch_from(&params, sizeof(func_arg));
 		if (!token_expect(':')) goto err;
-		allocation m = ALLOC(&ast.node_a.base, sizeof(type_t), 8);
-		assert(m.addr);
-		t.func_t.ret_t = m.addr;
-		*t.func_t.ret_t = parse_type();
+		type_t ret = parse_type();
+		t.func_t.ret_t = DUP(&ast.node_a.base, ret);
 	}
 	return t;
-err:
+err:;
 	t.kind=TYPE_NONE;
 	return t;
 }
@@ -159,21 +181,18 @@ err:;
 
 stmt_block parse_stmt_block(void)
 {
-	stmt_block body;
-	dyn_arr_init(&body, 1*sizeof(stmt), &ast.node_a.base);
-	if (!token_expect('{')) goto err;
-	while (!token_match('}')) {
+	dyn_arr body;
+	dyn_arr_init(&body, 0*sizeof(stmt), &ast.node_a.base);
+	if (token_expect('{')) while (!token_match('}')) {
 		stmt s = parse_stmt();
 		dyn_arr_push(&body, &s, sizeof s);
 	}
-err:
-	return body;
+	return scratch_from(&body, sizeof(stmt));
 }
 
 decl parse_decl(void)
 {
 	if (token_match_kw(tokens.kw_decl)) {
-		// map_entry name = tokens.current.processed;
 		if (!token_expect(TOKEN_NAME)) goto err;
 		map_entry name = tokens.current.processed;
 		type_t t = parse_type();
@@ -185,10 +204,10 @@ decl parse_decl(void)
 		} else {
 			if (!token_expect('=')) goto err;
 			expr init = parse_expr();
+			if (!token_expect(';')) goto err;
 			decl d = { .kind=DECL_VAR,
 				   .var_d={ name, DUP(&ast.node_a.base, t), init }};
 			return d;
-			if (!token_expect(';')) goto err;
 		}
 	} else {
 		token_unexpected();
@@ -200,8 +219,8 @@ decl parse_decl(void)
 
 decls_t parse_module(const char *cpath)
 {
-	decls_t m;
-	dyn_arr_init(&m, 1*sizeof(decl), ast.general);
+	dyn_arr m;
+	dyn_arr_init(&m, 0*sizeof(decl), ast.general);
 	int e = token_init(cpath, ast.general);
 	assert(!e);
 	do {
@@ -210,7 +229,7 @@ decls_t parse_module(const char *cpath)
 		assert(!e);
 	} while (!token_done());
 	token_fini();
-	return m;
+	return scratch_from(&m, sizeof(decl));
 }
 
 void test_ast(void)
@@ -223,7 +242,8 @@ void test_ast(void)
 	dyn_arr_fini(&tokens.line_marks);
 	map_fini(&tokens.map);
 	allocator_geom_fini(&tokens.names);
-	dyn_arr_fini(&decls);
+	DEALLOC(ast.general, decls);
 	ast_fini();
+	printf("  no news is good news.\n");
 }
 

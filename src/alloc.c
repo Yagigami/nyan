@@ -115,11 +115,12 @@ allocation allocator_arena_realloc(allocator *a_, allocation m, size_t size, siz
 			return ALLOC_SUCCESS(a->cur_low, size);
 		}
 	}
+	if (size < m.len) return m;
 	intptr_t ilim = (intptr_t)a->low_lim;
 	ilim = (ilim + mask) & ~mask;
 	void *next = (void*) ilim;
 	if (next + size > a->cur_high) return ALLOC_FAILURE;
-	memcpy(next, m.addr, m.len<size? m.len: size);
+	memcpy(next, m.addr, m.len);
 	a->low_lim = next + size;
 	a->cur_low = next;
 	return ALLOC_SUCCESS(next, size);
