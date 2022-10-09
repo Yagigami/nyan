@@ -78,6 +78,7 @@ typedef struct expr {
 		} binary;
 	};
 	expr_kind kind;
+	source_pos pos;
 } expr;
 
 typedef scratch_arr stmt_block; // array of stmt
@@ -85,6 +86,7 @@ typedef scratch_arr stmt_block; // array of stmt
 typedef struct decl {
 	ident_t name;
 	type_t type;
+	source_pos pos;
 	union {
 		struct {
 			expr init;
@@ -117,7 +119,7 @@ extern struct ast_state_t
 int ast_init(allocator *up, size_t node_pool_size, size_t max_pools);
 void ast_fini(void);
 
-decls_t parse_module(const char *cpath);
+decls_t parse_module(void);
 
 #define AST_DUP(a,v) ast_dup((a),&(v),sizeof (v))
 

@@ -35,7 +35,7 @@ int token_init(const char *path, allocator *up)
 				e = -1;
 				break;
 			}
-		tokens.lookahead.start = tokens.base;
+		tokens.lookahead.pos = 0;
 		tokens.lookahead.len = 0;
 		allocation m = ALLOC(up, 0x1000, 0x10);
 		assert(m.addr);
@@ -62,6 +62,7 @@ int token_init(const char *path, allocator *up)
 		tokens.kw_end   = ident_str(tokens.kw_decl);
 	}
 	token_advance();
+	token_advance();
 	return e;
 }
 
@@ -73,16 +74,17 @@ void token_fini(void)
 
 bool token_done(void)
 {
-	return tokens.lookahead.kind == TOKEN_END;
+	return tokens.current.kind == TOKEN_END;
 }
 
 void token_advance(void)
 {
 	tokens.current = tokens.lookahead;
-	const uint8_t *at = &tokens.lookahead.start[tokens.lookahead.len];
+	const uint8_t *at = &tokens.base[tokens.lookahead.pos+tokens.lookahead.len];
 	token next;
 again:
-	next.start = at;
+	next.pos = at-tokens.base;
+	const uint8_t *start = at;
 	switch ((next.kind = *at++)) {
 		map_entry line, *last_line;
 		map_entry *arr;
@@ -94,11 +96,11 @@ again:
 	case 'A' ... 'Z': case 'a' ... 'z': case '_':
 		next.kind = TOKEN_NAME;
 		while (isalpha(*at) || isdigit(*at) || *at == '_') at++;
-		if (at-next.start > IDENT_MAX_LEN) {
+		if (at-start > IDENT_MAX_LEN) {
 			next.kind = TOKEN_ERR_LONG_NAME;
 			break;
 		}
-		next.processed = intern_string(next.start, at-next.start);
+		next.processed = intern_string(start, at-start);
 		if (ident_in_range(next.processed, tokens.kw_begin, tokens.kw_end)) next.kind = TOKEN_KEYWORD;
 		break;
 	case '0' ... '9':
@@ -130,13 +132,13 @@ again:
 	default:
 		next.kind = TOKEN_ERR_BEGIN;
 	}
-	next.len = at - next.start;
+	next.len = at - start;
 	tokens.lookahead = next;
 }
 
 bool token_is(token_kind k)
 {
-	return tokens.lookahead.kind == k;
+	return tokens.current.kind == k;
 }
 
 bool token_match(token_kind k)
@@ -150,14 +152,14 @@ bool token_match(token_kind k)
 
 const uint8_t *token_at(void)
 {
-	return tokens.lookahead.start;
+	return &tokens.base[tokens.current.pos];
 }
 
 bool token_expect(token_kind k)
 {
 	bool r = token_match(k);
 	if (!r) {
-		print(stderr, token_at(), "error, expected token ", k, ", got ", tokens.lookahead, " instead.\n");
+		print(stderr, token_at(), "error, expected token ", k, ", got ", tokens.current, " instead.\n");
 		// fprintf(stderr, "error, expected token %d, got %d `%.*s`.\n", k, tokens.current.kind,
 				// (int) tokens.current.len, (const char*)&tokens.current.start);
 		ast.errors++;
@@ -173,13 +175,11 @@ void test_token(void)
 	int e = token_init("cr/basic.cr", &malloc_allocator);
 	assert(e == 0);
 	do {
-		token_advance();
-		print(stdout, token_at(), "\t", tokens.current, "\n");
+		print(stdout, "\t", tokens.current, "\n");
 		if (TOKEN_ERR_BEGIN <= tokens.current.kind && tokens.current.kind <= TOKEN_ERR_END) {
-			print(stderr, tokens.current.start, "error, unknown token ", tokens.current, ".\n");
-			// fprintf(stderr, "error, unknown token `%.*s` in file.\n",
-					// (int) tokens.current.len, tokens.current.start);
+			print(stderr, &tokens.base[tokens.current.pos], "error, unknown token ", tokens.current, ".\n");
 		}
+		token_advance();
 	} while (!token_done());
 	token_fini();
 	dyn_arr_fini(&tokens.line_marks);
@@ -224,7 +224,7 @@ static bool ident_equals(ident_t L, ident_t R);
 
 bool token_is_kw(ident_t kw)
 {
-	return tokens.lookahead.kind == TOKEN_KEYWORD && ident_equals(tokens.lookahead.processed, kw);
+	return tokens.current.kind == TOKEN_KEYWORD && ident_equals(tokens.current.processed, kw);
 }
 
 bool token_match_kw(ident_t kw)
@@ -252,14 +252,14 @@ bool token_expect_kw(ident_t kw)
 bool token_match_precedence(token_kind p)
 {
 	assert(0 <= p && p < sizeof token_precedence/sizeof *token_precedence);
-	bool r = token_precedence[tokens.lookahead.kind] == p;
+	bool r = token_precedence[tokens.current.kind] == p;
 	if (r) token_advance();
 	return r;
 }
 
 void token_unexpected(void)
 {
-	print(stderr, token_at(), "unexpected token ", tokens.lookahead, "\n");
+	print(stderr, token_at(), "unexpected token ", tokens.current, "\n");
 	token_skip_to_newline();
 }
 
@@ -298,4 +298,14 @@ ident_t ident_from(const uint8_t *start, size_t len)
 	size_t lenm1 = len-1;
 	assert((lenm1 & ~IDENT_LEN_MASK) == 0 && "identifier too long or 0-length");
 	return ((uintptr_t)start << IDENT_SHIFT) | lenm1;
+}
+
+source_pos token_pos(void)
+{
+	return tokens.current.pos;
+}
+
+const uint8_t *token_source(source_pos pos)
+{
+	return &tokens.base[pos];
 }

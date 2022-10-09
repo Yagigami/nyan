@@ -18,30 +18,34 @@ void print_init(allocation buf);
 void print_fini(void);
 
 #if false // works as if defined like this // 8 variable arguments at max
-int print(FILE *to, const uint8_t *at, ...);
+int print(FILE *to, ...);
+bool expect_or(bool condition, ...);
 #endif
-#define print(to,at,...) _print_impl((to),(at), \
+#define print(to,...) _print_impl((to), \
 		((MSK(__VA_ARGS__))<<ARGS_SHIFT)|NUM_ARGS(_, ## __VA_ARGS__), \
 		## __VA_ARGS__)
+#define expect_or(cond, ...) ((cond) ? true: (print(stderr, ## __VA_ARGS__), ast.errors++, false)) // STUPID PRECEDENCE RULES LOL
 
 typedef enum {
 	P_STRING,
 	P_KEYWORD,
+	P_SOURCE_LINE,
 	P_TOKEN,
 	P_TOKEN_KIND,
 
 	P_END = P_TOKEN_KIND
 } printable;
-#define PRINTABLE_SHIFT 2
+#define PRINTABLE_SHIFT 3
 static_assert(P_END < (1<<PRINTABLE_SHIFT), "increase PRINTABLE_SHIFT");
 #define FMT(x) (_Generic((x), \
-			char*: P_STRING, \
+			char* /* JUST C THINGS LOL */: P_STRING, \
 			ident_t : P_KEYWORD, \
+			const uint8_t* : P_SOURCE_LINE, \
 			token : P_TOKEN, \
 			token_kind : P_TOKEN_KIND \
 			))
 
-int _print_impl(FILE *to, const uint8_t *at, uint64_t bitmap, ...);
+int _print_impl(FILE *to, uint64_t bitmap, ...);
 
 #define MAX_ARGS 8
 #define ARGS_SHIFT 3

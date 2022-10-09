@@ -16,10 +16,12 @@ ident_t ident_from(const uint8_t *start, size_t len);
 size_t ident_len(ident_t i);
 const uint8_t *ident_str(ident_t i);
 
+typedef size_t source_pos;
+
 typedef struct {
-	const uint8_t *start;
-	uint64_t len: 56;
-	uint64_t kind: 8;
+	source_pos pos;
+	uint64_t len;
+	uint64_t kind;
 	union { ident_t processed; uint64_t value; };
 } token;
 
@@ -74,6 +76,9 @@ size_t find_line(const uint8_t *at);
 void token_skip_to_newline(void);
 
 size_t string_hash(key_t k);
+
+source_pos token_pos(void);
+const uint8_t *token_source(source_pos pos);
 
 #endif /* CROUTE_TOKEN_H */
 

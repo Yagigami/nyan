@@ -16,11 +16,11 @@ static int fprint_token(FILE *to, token tk)
 	case TOKEN_INT:
 		return fprintf(to, "#%lu", tk.value);
 	case TOKEN_ERR_LONG_NAME:
-		return fprintf(to, "`%.*s` (too long with %zu characters)", (int) tk.len, (char*) tk.start, (size_t) tk.len);
+		return fprintf(to, "`%.*s` (too long with %zu characters)", (int) tk.len, (char*) tokens.base+tk.pos, (size_t) tk.len);
 	default:
 		return isprint(tk.kind) ?
-			fprintf(to, "'%c'", tk.kind) :
-			fprintf(to, "`%.*s`", (int) tk.len, (char*) tk.start);
+			fprintf(to, "'%c'", (int) tk.kind) :
+			fprintf(to, "`%.*s`", (int) tk.len, (char*) tokens.base+tk.pos);
 	}
 }
 
@@ -43,13 +43,19 @@ static int fprint_keyword(FILE *to, ident_t e)
 	return fprintf(to, "'%.*s'", (int) ident_len(e), (char*) ident_str(e));
 }
 
-int _print_impl(FILE *to, const uint8_t *at, uint64_t bitmap, ...)
+static int fprint_source_line(FILE *to, const uint8_t *p)
+{
+	size_t line = find_line(p);
+	map_entry *e = tokens.line_marks.buf.addr + line * sizeof *e;
+	return fprintf(to, "%s:%zu:%.*s\n", tokens.cpath, line, (int)(e->v - e->k), (char*) e->k);
+}
+
+int _print_impl(FILE *to, uint64_t bitmap, ...)
 {
 	va_list args;
 	va_start(args, bitmap);
-	size_t line = find_line(at);
 	size_t n = bitmap & ((1<<ARGS_SHIFT)-1);
-	int printed = fprintf(to, "%s:%zu:", tokens.cpath, line);
+	int printed = 0;
 	bitmap >>= ARGS_SHIFT;
 	for (size_t i=0; i<n; i++, bitmap >>= PRINTABLE_SHIFT) switch (bitmap & ((1<<PRINTABLE_SHIFT)-1)) {
 	case P_STRING:
@@ -63,6 +69,9 @@ int _print_impl(FILE *to, const uint8_t *at, uint64_t bitmap, ...)
 		break;
 	case P_KEYWORD:
 		printed += fprint_keyword(to, va_arg(args, ident_t));
+		break;
+	case P_SOURCE_LINE:
+		printed += fprint_source_line(to, va_arg(args, uint8_t*));
 		break;
 	default:
 		__builtin_unreachable();
