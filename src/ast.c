@@ -33,8 +33,7 @@ static type_kind parse_type_prim(void);
 static type_t parse_type_target(type_t base);
 static void parse_type_params(dyn_arr *p);
 
-#define DUP(a,v) ast_dup((a),&(v),sizeof (v))
-static void *ast_dup(allocator *a, void *addr, size_t size)
+void *ast_dup(allocator *a, void *addr, size_t size)
 {
 	allocation m = ALLOC(a,size,8);
 	assert(m.addr);
@@ -69,7 +68,7 @@ expr parse_expr_call(void)
 		while (!token_match(')')) {
 			assert(0 && "not implemented");
 		}
-		expr *dup = DUP(&ast.node_a.base, operand);
+		expr *dup = AST_DUP(&ast.node_a.base, operand);
 		operand.kind = EXPR_CALL;
 		operand.call.operand = dup;
 		operand.call.args = scratch_from(&args, sizeof(expr));
@@ -85,7 +84,7 @@ expr parse_expr_add(void)
 		assert(kind == '+' || kind == '-');
 		expr R = parse_expr_add();
 		expr e = { .kind=EXPR_BINARY,
-			   .binary={ DUP(&ast.node_a.base, L), DUP(&ast.node_a.base, R), kind }};
+			   .binary={ AST_DUP(&ast.node_a.base, L), AST_DUP(&ast.node_a.base, R), kind }};
 		return e;
 	}
 	return L;
@@ -107,8 +106,7 @@ void parse_type_params(dyn_arr *p)
 		if (!token_expect(':')) return;
 		type_t type = parse_type();
 		func_arg a = { name, type };
-		int e = dyn_arr_push(p, &a, sizeof a);
-		assert(!e);
+		dyn_arr_push(p, &a, sizeof a);
 	}
 }
 
@@ -142,7 +140,7 @@ type_t parse_type(void)
 		t.func_t.params = scratch_from(&params, sizeof(func_arg));
 		if (!token_expect(':')) goto err;
 		type_t ret = parse_type();
-		t.func_t.ret_t = DUP(&ast.node_a.base, ret);
+		t.func_t.ret_t = AST_DUP(&ast.node_a.base, ret);
 	}
 	return t;
 err:;
@@ -198,15 +196,15 @@ decl parse_decl(void)
 		type_t t = parse_type();
 		if (t.kind == TYPE_FUNC) {
 			stmt_block body = parse_stmt_block();
-			decl d = { .kind=DECL_FUNC,
-				   .func_d={ name, DUP(&ast.node_a.base, t), body }};
+			decl d = { .kind=DECL_FUNC, .name=name, .type=t,
+				.func_d={ body }};
 			return d;
 		} else {
 			if (!token_expect('=')) goto err;
 			expr init = parse_expr();
 			if (!token_expect(';')) goto err;
-			decl d = { .kind=DECL_VAR,
-				   .var_d={ name, DUP(&ast.node_a.base, t), init }};
+			decl d = { .kind=DECL_VAR, .name=name, .type=t,
+				.var_d={ init }};
 			return d;
 		}
 	} else {
@@ -225,8 +223,7 @@ decls_t parse_module(const char *cpath)
 	assert(!e);
 	do {
 		decl d = parse_decl();
-		e = dyn_arr_push(&m, &d, sizeof d);
-		assert(!e);
+		dyn_arr_push(&m, &d, sizeof d);
 	} while (!token_done());
 	token_fini();
 	return scratch_from(&m, sizeof(decl));

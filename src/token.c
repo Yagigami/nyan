@@ -47,8 +47,7 @@ int token_init(const char *path, allocator *up)
 		assert(!e);
 		// maybe use a different type at some point lol, it never goes in a map
 		map_entry empty = { .k=(intptr_t)tokens.base, .v=(intptr_t)(tokens.base+tokens.len) };
-		e = dyn_arr_push(&tokens.line_marks, &empty, sizeof empty);
-		assert(!e);
+		dyn_arr_push(&tokens.line_marks, &empty, sizeof empty);
 		#define KW(kw) do {\
 			tokens.kw_##kw = intern_string((const uint8_t*) #kw, strlen(#kw)); \
 			} while (0)
@@ -188,15 +187,15 @@ void test_token(void)
 	allocator_geom_fini(&tokens.names);
 }
 
-static size_t string_hash(key_t k)
+size_t string_hash(key_t k)
 {
-	size_t h = 0;
+	size_t h = 0x23be1793daa2779fU;
 	const uint8_t *start = ident_str(k), *end = start + ident_len(k);
 	for (const uint8_t *c=start; c != end; c++) h = h*15 ^ (*c * h);
 	return h;
 }
 
-static int string_cmp(key_t L, key_t R)
+static int _string_cmp(key_t L, key_t R)
 {
 	if (ident_len(L) != ident_len(R)) return ident_len(L) - ident_len(R);
 	const uint8_t *lc=ident_str(L), *rc=ident_str(R), *lend = lc + ident_len(L);
@@ -206,7 +205,7 @@ static int string_cmp(key_t L, key_t R)
 	return 0;
 }
 
-static key_t string_insert(key_t from)
+static key_t _string_insert(key_t from)
 {
 	allocation m = ALLOC(&tokens.names.base, ident_len(from), 1);
 	assert(m.addr);
@@ -216,7 +215,7 @@ static key_t string_insert(key_t from)
 
 ident_t intern_string(const uint8_t *start, size_t len)
 {
-	map_entry *r = map_id(&tokens.map, ident_from(start, len), string_hash, string_cmp, string_insert);
+	map_entry *r = map_id(&tokens.map, ident_from(start, len), string_hash, _string_cmp, _string_insert);
 	assert(r);
 	return r->k;
 }

@@ -70,7 +70,7 @@ typedef struct expr {
 		ident_t name;
 		struct {
 			struct expr *operand;
-			scratch_arr args; // array of expr*
+			scratch_arr args; // array of expr
 		} call;
 		struct {
 			struct expr *L, *R;
@@ -83,15 +83,13 @@ typedef struct expr {
 typedef scratch_arr stmt_block; // array of stmt
 
 typedef struct decl {
+	ident_t name;
+	type_t type;
 	union {
 		struct {
-			ident_t name;
-			type_t *type;
 			expr init;
 		} var_d;
 		struct {
-			ident_t name;
-			type_t *type;
 			stmt_block body;
 		} func_d;
 	};
@@ -120,6 +118,8 @@ int ast_init(allocator *up, size_t node_pool_size, size_t max_pools);
 void ast_fini(void);
 
 decls_t parse_module(const char *cpath);
+
+#define AST_DUP(a,v) ast_dup((a),&(v),sizeof (v))
 
 #endif /* CROUTE_AST_H */
 

@@ -1,6 +1,7 @@
 #include "alloc.h"
 #include "dynarr.h"
 
+#include <assert.h>
 #include <string.h>
 
 
@@ -37,17 +38,26 @@ fail:
 	return e;
 }
 
-int dyn_arr_push(dyn_arr *v, void *addr, size_t size)
+void *dyn_arr_push(dyn_arr *v, void *addr, size_t size)
 {
 	int e = dyn_arr_resize_if_needed(v, size);
-	if (e) goto fail;
-	memcpy(v->buf.addr + v->len*size, addr, size);
+	assert(!e);
+	void *to = v->buf.addr + v->len*size;
+	if (addr) memcpy(to, addr, size);
 	v->len++;
-	e = 0;
-fail:
-	return e;
+	return to;
 }
 
+void dyn_arr_pop(dyn_arr *v)
+{
+	assert(v->len);
+	v->len--;
+}
+
+bool dyn_arr_empty(dyn_arr *v)
+{
+	return v->len == 0;
+}
 
 scratch_arr scratch_from(dyn_arr *v, size_t size)
 {

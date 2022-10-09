@@ -27,6 +27,8 @@ typedef size_t (*map_hash)(key_t k);
 typedef int (*map_cmp)(key_t L, key_t R);
 typedef key_t (*map_insert)(key_t k);
 map_entry *map_id(map *map, key_t k, map_hash hash, map_cmp cmp, map_insert insert);
+map_entry *map_find(map *map, key_t k, size_t h, map_cmp cmp);
+map_entry *map_add(map *map, key_t k, map_hash hash);
 
 #endif /* CROUTE_MAP_H */
 

@@ -73,6 +73,7 @@ const uint8_t *token_at(void);
 size_t find_line(const uint8_t *at);
 void token_skip_to_newline(void);
 
+size_t string_hash(key_t k);
 
 #endif /* CROUTE_TOKEN_H */
 

@@ -108,13 +108,29 @@ allocation allocator_arena_realloc(allocator *a_, allocation m, size_t size, siz
 	allocator_arena *a = (allocator_arena*)a_;
 	assert(align != 0);
 	size_t mask = align-1;
-	if (!m.addr || (m.addr == a->cur_low && m.addr+m.len == a->low_lim)) { // fast path
-		intptr_t icur = (intptr_t)a->cur_low;
-		if((icur & mask) == 0 && a->cur_low + size <= a->cur_high) {
+	// not very correct...
+	// ```c
+	// 	int *p = realloc(0xdeadbeef, 6*sizeof *p);
+	// 	double *q = realloc(null, 3*sizeof *q);
+	// 	assert(p == q);
+	// ```
+	// 	===> in the usage cases this can be a problem in 2 situations:
+	// 		- a recursive function calls realloc
+	// 		- a function returns a buffer
+	// 	===> solution taken for now: null and 0xdeadbeef give different behavior
+	intptr_t icur = (intptr_t)a->cur_low;
+	if ((icur & mask) != 0) goto slow;
+	if (!m.addr && a->low_lim+size <= a->cur_high) {
+		a->cur_low = a->low_lim;
+		a->low_lim = a->cur_low + size;
+		return ALLOC_SUCCESS(a->cur_low, size);
+	} else if (m.addr == a->cur_low && m.addr+m.len == a->low_lim) {
+		if(a->cur_low + size <= a->cur_high) {
 			a->low_lim = a->cur_low + size;
 			return ALLOC_SUCCESS(a->cur_low, size);
 		}
 	}
+slow:
 	if (size < m.len) return m;
 	intptr_t ilim = (intptr_t)a->low_lim;
 	ilim = (ilim + mask) & ~mask;

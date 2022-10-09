@@ -51,8 +51,9 @@ map_entry *map_rehash_if_needed(map *map, map_entry *watch, map_hash hash)
 
 map_entry *map_id(map *map, key_t k, map_hash hash, map_cmp cmp, map_insert insert)
 {
-	size_t h = hash(k);
 	size_t cap = map->m.len / sizeof(map_entry);
+	assert(cap >= 2);
+	size_t h = hash(k);
 	for (size_t i=h%cap;; i = (i+1) % cap) {
 		map_entry *e = map->m.addr + i*sizeof *e;
 		if (!e->k) {
@@ -60,12 +61,37 @@ map_entry *map_id(map *map, key_t k, map_hash hash, map_cmp cmp, map_insert inse
 			map->cnt++;
 			return map_rehash_if_needed(map, e, hash);
 		}
+		// maybe omit
 		if (hash(e->k) != h) continue;
 		if (cmp(e->k, k) != 0) continue;
 		return e;
 	}
 }
 
+map_entry *map_find(map *map, key_t k, size_t h, map_cmp cmp)
+{
+	size_t cap = map->m.len / sizeof(map_entry);
+	if (!cap) return NULL;
+	for (size_t i = h%cap;; i = (i+1) % cap) {
+		map_entry *e = map->m.addr + i*sizeof *e;
+		if (!e->k) return NULL;
+		// omitted the hash
+		if (cmp(e->k, k) == 0) return e;
+	}
+}
+
+map_entry *map_add(map *map, key_t k, map_hash hash)
+{
+	map->cnt++;
+	map_rehash_if_needed(map, NULL, hash);
+	size_t h = hash(k);
+	size_t cap = map->m.len / sizeof(map_entry);
+	for (size_t i = h%cap;; i = (i+1) % cap) {
+		map_entry *e = map->m.addr + i*sizeof *e;
+		if (e->k) continue;
+		return e;
+	}
+}
 
 static size_t test_hash(key_t e);
 static int test_cmp(key_t L, key_t R);
