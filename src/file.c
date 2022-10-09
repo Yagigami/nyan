@@ -8,7 +8,7 @@
 #include <unistd.h>
 
 
-int cr_map_file_sentinel(const char *cstr, const uint8_t **view, size_t *len)
+int map_file_sentinel(const char *cstr, const uint8_t **view, size_t *len)
 {
 	int status = -1;
 	int err = open(cstr, O_RDONLY);
@@ -35,7 +35,7 @@ fail_open:
 	return status;
 }
 
-int cr_unmap_file_sentinel(const uint8_t *view, size_t len)
+int unmap_file_sentinel(const uint8_t *view, size_t len)
 {
 	// doesnt matter
 	return munmap((uint8_t *)view, len);

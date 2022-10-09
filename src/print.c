@@ -8,7 +8,7 @@
 
 static size_t find_line(const uint8_t *at)
 {
-	const cr_map_entry *arr = tokens.line_marks.buf.addr;
+	const map_entry *arr = tokens.line_marks.buf.addr;
 	size_t L = 0, R = tokens.line_marks.len;
 	size_t M;
 	while (true) {
@@ -23,14 +23,14 @@ static size_t find_line(const uint8_t *at)
 	return M;
 }
 
-static int fprint_token(FILE *to, cr_token tk)
+static int fprint_token(FILE *to, token tk)
 {
 	switch (tk.kind) {
-	case CR_TOKEN_NAME:
+	case TOKEN_NAME:
 		return fprintf(to, "name('%.*s')", (int) tk.processed.v, (char*) tk.processed.k);
-	case CR_TOKEN_KEYWORD:
+	case TOKEN_KEYWORD:
 		return fprintf(to, "keyword('%.*s')", (int) tk.processed.v, (char*) tk.processed.k);
-	case CR_TOKEN_INT:
+	case TOKEN_INT:
 		return fprintf(to, "int(%lu)", tk.value);
 	default:
 		return isprint(tk.kind) ?
@@ -39,21 +39,21 @@ static int fprint_token(FILE *to, cr_token tk)
 	}
 }
 
-static int fprint_token_kind(FILE *to, cr_token_kind k)
+static int fprint_token_kind(FILE *to, token_kind k)
 {
 	switch (k) {
-	case CR_TOKEN_NAME:
+	case TOKEN_NAME:
 		return fprintf(to, "name");
-	case CR_TOKEN_KEYWORD:
+	case TOKEN_KEYWORD:
 		return fprintf(to, "keyword");
-	case CR_TOKEN_INT:
+	case TOKEN_INT:
 		return fprintf(to, "<int>");
 	default:
 		return fprintf(to, "'%c' (%d)", k, k);
 	}
 }
 
-static int fprint_keyword(FILE *to, cr_map_entry e)
+static int fprint_keyword(FILE *to, map_entry e)
 {
 	return fprintf(to, "'%.*s'", (int) e.v, (char*) e.k);
 }
@@ -71,13 +71,13 @@ int _print_impl(FILE *to, const uint8_t *at, uint64_t bitmap, ...)
 		printed += fprintf(to, "%s", va_arg(args, char*));
 		break;
 	case P_TOKEN:
-		printed += fprint_token(to, va_arg(args, cr_token));
+		printed += fprint_token(to, va_arg(args, token));
 		break;
 	case P_TOKEN_KIND:
-		printed += fprint_token_kind(to, va_arg(args, cr_token_kind));
+		printed += fprint_token_kind(to, va_arg(args, token_kind));
 		break;
 	case P_KEYWORD:
-		printed += fprint_keyword(to, va_arg(args, cr_map_entry));
+		printed += fprint_keyword(to, va_arg(args, map_entry));
 		break;
 	default:
 		__builtin_unreachable();

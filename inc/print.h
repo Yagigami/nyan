@@ -11,10 +11,10 @@
 
 extern struct print_state
 {
-	cr_allocation buf;
+	allocation buf;
 } prints;
 
-void print_init(cr_allocation buf);
+void print_init(allocation buf);
 void print_fini(void);
 
 #if false // works as if defined like this // 8 variable arguments at max
@@ -36,9 +36,9 @@ typedef enum {
 static_assert(P_END < (1<<PRINTABLE_SHIFT), "increase PRINTABLE_SHIFT");
 #define FMT(x) (_Generic((x), \
 			char*: P_STRING, \
-			cr_map_entry : P_KEYWORD, \
-			cr_token : P_TOKEN, \
-			cr_token_kind : P_TOKEN_KIND \
+			map_entry : P_KEYWORD, \
+			token : P_TOKEN, \
+			token_kind : P_TOKEN_KIND \
 			))
 
 int _print_impl(FILE *to, const uint8_t *at, uint64_t bitmap, ...);

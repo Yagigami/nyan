@@ -14,45 +14,52 @@ typedef struct {
 	const uint8_t *start;
 	uint64_t len: 56;
 	uint64_t kind: 8;
-	union { cr_map_entry processed; uint64_t value; };
-} cr_token;
+	union { map_entry processed; uint64_t value; };
+} token;
 
 typedef enum {
-	CR_TOKEN_END = '\0',
-	CR_TOKEN_ERR = 1,
-	CR_TOKEN_ASCII_DELIM = 128,
-	CR_TOKEN_NAME,
-	CR_TOKEN_KEYWORD,
-	CR_TOKEN_INT,
-} cr_token_kind;
+	TOKEN_END = '\0',
+	TOKEN_ERR = 1,
+	TOKEN_ASCII_DELIM = 128,
+	TOKEN_NAME,
+	TOKEN_KEYWORD,
+	TOKEN_INT,
+
+	TOKEN_NUM
+} token_kind;
 
 // a compiler is called on 1 file. globals are fine
-extern struct cr_global_token_state {
-	cr_token current;
-	cr_token lookahead;
+extern struct global_token_state {
+	token current;
+	token lookahead;
 	const char *cpath;
 	const uint8_t *base;
 	size_t len;
-	cr_map map;
+	map map;
 	dyn_arr line_marks;
-	cr_allocator_geom names;
-	cr_map_entry kw_decl,
+	allocator_geom names;
+	map_entry kw_decl,
 		     kw_func,
 		     kw_int,
 		     kw_return;
 	const void *kw_begin, *kw_end;
 } tokens;
 
-int cr_token_init(const char *path, cr_allocator *up);
-void cr_token_fini();
+int token_init(const char *path, allocator *up);
+void token_fini(void);
 
-bool cr_token_done();
-void cr_token_advance();
-bool cr_token_match(cr_token_kind k);
-void cr_token_expect(cr_token_kind k);
-bool cr_token_is_kw(cr_map_entry kw);
-bool cr_token_match_kw(cr_map_entry kw);
-void cr_token_expect_kw(cr_map_entry kw);
+bool token_done(void);
+void token_advance(void);
+bool token_is(token_kind k);
+bool token_match(token_kind k);
+bool token_expect(token_kind k);
+bool token_is_kw(map_entry kw);
+bool token_match_kw(map_entry kw);
+bool token_expect_kw(map_entry kw);
+bool token_match_precedence(token_kind p);
+void token_unexpected(void);
+const uint8_t *token_at(void);
+
 
 #endif /* CROUTE_TOKEN_H */
 

@@ -4,10 +4,10 @@
 #include <string.h>
 
 
-int dyn_arr_init(dyn_arr *v, size_t cap, cr_allocator *a)
+int dyn_arr_init(dyn_arr *v, size_t cap, allocator *a)
 {
 	int e = -1;
-	v->buf = CR_REALLOC(a, CR_ALLOC_FAILURE, cap, 8);
+	v->buf = REALLOC(a, ALLOC_FAILURE, cap, 8);
 	if (!v->buf.addr) goto fail;
 	v->len = 0;
 	v->a = a;
@@ -18,15 +18,18 @@ fail:
 
 void dyn_arr_fini(dyn_arr *v)
 {
-	CR_DEALLOC(v->a, v->buf);
+	DEALLOC(v->a, v->buf);
 }
 
 static int dyn_arr_resize_if_needed(dyn_arr *v, size_t size)
 {
-	if ((v->len + 1)*size < v->buf.len) return 0;
+	size_t size_after = (v->len + 1)*size;
+	if (size_after < v->buf.len) return 0;
 	int e = -1;
 	size_t growth_factor = 2;
-	cr_allocation m = CR_REALLOC(v->a, v->buf, growth_factor*v->buf.len, 8);
+	size_t new_size = growth_factor * v->buf.len;
+	if (new_size < size_after) new_size = size_after;
+	allocation m = REALLOC(v->a, v->buf, new_size, 8);
 	if (!m.addr) goto fail;
 	v->buf = m;
 	e = 0;
