@@ -131,7 +131,7 @@ allocation allocator_arena_realloc(allocator *a_, allocation m, size_t size, siz
 		}
 	}
 slow:
-	if (size < m.len) return m;
+	if (size < m.len) return ALLOC_SUCCESS(m.addr, size);
 	intptr_t ilim = (intptr_t)a->low_lim;
 	ilim = (ilim + mask) & ~mask;
 	void *next = (void*) ilim;

@@ -1,6 +1,7 @@
 #include "ast.h"
 #include "scope.h"
 #include "print.h"
+#include "type_check.h"
 
 #include <assert.h>
 #include <string.h>
@@ -30,7 +31,7 @@ static expr parse_expr_call(void);
 static expr parse_expr_add(void);
 
 static type_t parse_type(void);
-static type_kind parse_type_prim(void);
+static type_t parse_type_prim(void);
 static type_t parse_type_target(type_t base);
 static void parse_type_params(dyn_arr *p);
 
@@ -114,16 +115,22 @@ void parse_type_params(dyn_arr *p)
 	}
 }
 
-type_kind parse_type_prim(void)
+type_t parse_type_prim(void)
 {
-	if (token_match_kw(tokens.kw_func))
-		return TYPE_FUNC;
-	if (token_match_kw(tokens.kw_int32))
-		return TYPE_PRIMITIVE;
+	type_t t;
+	if (token_match_kw(tokens.kw_func)) {
+		t.kind = TYPE_FUNC;
+		return t;
+	} else if (token_match_kw(tokens.kw_int32)) {
+		t.kind = TYPE_PRIMITIVE;
+		t.name = tokens.kw_int32;
+		return t;
+	}
 	print(stderr, token_at(), "unknown type ", tokens.current, "\n");
 	ast.errors++;
 	token_skip_to_newline();
-	return TYPE_NONE;
+	t.kind = TYPE_NONE;
+	return t;
 }
 
 type_t parse_type_target(type_t base)
@@ -133,10 +140,9 @@ type_t parse_type_target(type_t base)
 
 type_t parse_type(void)
 {
-	type_kind k = parse_type_prim();
-	type_t t = { .kind=k };
+	type_t t = parse_type_prim();
 	t = parse_type_target(t);
-	if (k == TYPE_FUNC) {
+	if (t.kind == TYPE_FUNC) {
 		dyn_arr params;
 		int e = dyn_arr_init(&params, 0*sizeof(func_arg), &ast.node_a.base);
 		assert(!e);
@@ -147,7 +153,7 @@ type_t parse_type(void)
 		t.func_t.ret_t = AST_DUP(&ast.node_a.base, ret);
 	}
 	return t;
-err:;
+err:
 	t.kind=TYPE_NONE;
 	return t;
 }
@@ -244,6 +250,7 @@ void test_ast(void)
 	resolve_init(ast.general, 1);
 	resolve_refs(decls, &global);
 	resolve_fini();
+	type_check(decls, &global);
 
 	dyn_arr_fini(&tokens.line_marks);
 	map_fini(&tokens.map);
