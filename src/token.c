@@ -51,7 +51,6 @@ int token_init(const char *path, allocator *up)
 		#define KW(kw) do {\
 			tokens.kw_##kw = intern_string((const uint8_t*) #kw, strlen(#kw)); \
 			} while (0)
-		KW(decl);
 		KW(func);
 		KW(int32);
 		KW(return);
@@ -59,7 +58,7 @@ int token_init(const char *path, allocator *up)
 
 		// arena grows down
 		tokens.kw_begin = ident_str(tokens.kw_return);
-		tokens.kw_end   = ident_str(tokens.kw_decl);
+		tokens.kw_end   = ident_str(tokens.kw_func);
 	}
 	token_advance();
 	token_advance();
@@ -168,6 +167,10 @@ bool token_expect(token_kind k)
 	return r;
 }
 
+bool lookahead_is(token_kind k)
+{
+	return tokens.lookahead.kind == k;
+}
 
 void test_token(void)
 {
@@ -247,6 +250,11 @@ bool token_expect_kw(ident_t kw)
 		token_skip_to_newline();
 	}
 	return r;
+}
+
+bool lookahead_is_kw(ident_t kw)
+{
+	return tokens.lookahead.kind == TOKEN_KEYWORD && tokens.lookahead.processed == kw;
 }
 
 bool token_match_precedence(token_kind p)

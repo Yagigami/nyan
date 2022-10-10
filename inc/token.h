@@ -51,10 +51,9 @@ extern struct global_token_state {
 	map map;
 	dyn_arr line_marks;
 	allocator_geom names;
-	ident_t kw_decl,
-		     kw_func,
-		     kw_int32,
-		     kw_return;
+	ident_t kw_func,
+	        kw_int32,
+		kw_return;
 	const void *kw_begin, *kw_end;
 } tokens;
 
@@ -63,14 +62,20 @@ void token_fini(void);
 
 bool token_done(void);
 void token_advance(void);
+
 bool token_is(token_kind k);
 bool token_match(token_kind k);
 bool token_expect(token_kind k);
+bool lookahead_is(token_kind k);
+
 bool token_is_kw(ident_t kw);
 bool token_match_kw(ident_t kw);
 bool token_expect_kw(ident_t kw);
+bool lookahead_is_kw(ident_t kw);
+
 bool token_match_precedence(token_kind p);
 void token_unexpected(void);
+
 const uint8_t *token_at(void);
 size_t find_line(const uint8_t *at);
 void token_skip_to_newline(void);

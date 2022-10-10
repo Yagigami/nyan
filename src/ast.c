@@ -159,22 +159,22 @@ stmt parse_stmt(void)
 		if (!token_match(';')) goto err;
 		stmt s = { .kind=STMT_RETURN, .e=v };
 		return s;
-	} else if (token_is_kw(tokens.kw_decl)) {
-		decl d = parse_decl();
-		stmt s = { .kind=STMT_DECL, .d=d };
-		return s;
-	} else {
-		expr L = parse_expr();
-		if (!token_match(';')) {
-			if (!token_expect('=')) goto err;
-			expr R = parse_expr();
-			stmt s = { .kind=STMT_ASSIGN,
-				   .assign={ L, R }};
-			if (!token_expect(';')) goto err;
+	} else if (token_is(TOKEN_NAME)) {
+		if (lookahead_is(':')) {
+			stmt s = { .kind=STMT_DECL, .d=parse_decl() };
+			return s;
+		} else {
+			expr L = parse_expr();
+			if (!token_match(';')) {
+				if (!token_expect('=')) goto err;
+				expr R = parse_expr();
+				stmt s = { .kind=STMT_ASSIGN, .assign={ L, R }};
+				if (!token_expect(';')) goto err;
+				return s;
+			}
+			stmt s = { .kind=STMT_EXPR, .e=L };
 			return s;
 		}
-		stmt s = { .kind=STMT_EXPR, .e=L };
-		return s;
 	}
 err:;
 	stmt s = { .kind=STMT_NONE };
@@ -194,30 +194,31 @@ stmt_block parse_stmt_block(void)
 
 decl parse_decl(void)
 {
-	if (token_match_kw(tokens.kw_decl)) {
-		source_pos pos = token_pos();
-		ident_t name = tokens.current.processed;
-		if (!token_expect(TOKEN_NAME)) goto err;
+	source_pos pos = token_pos();
+	ident_t name = tokens.current.processed;
+	if (!token_expect(TOKEN_NAME)) goto err;
+	if (token_match(':')) { // var decl
 		type_t t = parse_type();
-		if (t.kind == TYPE_FUNC) {
-			stmt_block body = parse_stmt_block();
-			decl d = { .kind=DECL_FUNC, .name=name, .type=t, .pos=pos,
-				.func_d={ body }};
-			return d;
-		} else {
-			if (!token_expect('=')) goto err;
-			expr init = parse_expr();
-			if (!token_expect(';')) goto err;
-			decl d = { .kind=DECL_VAR, .name=name, .type=t, .pos=pos,
-				.var_d={ init }};
-			return d;
-		}
+		if (!expect_or(t.kind != TYPE_FUNC,
+			token_source(pos), "function types are not prefixed by ':'.\n")) goto err;
+		if (!token_expect('=')) goto err;
+		expr init = parse_expr();
+		if (!token_expect(';')) goto err;
+		decl d = { .kind=DECL_VAR, .name=name, .type=t, .pos=pos,
+			.var_d={ init }};
+		return d;
 	} else {
-		token_unexpected();
+		type_t t = parse_type();
+		if (!expect_or(t.kind == TYPE_FUNC,
+			token_source(pos), "a function type was expected here.\n")) goto err;
+		stmt_block body = parse_stmt_block();
+		decl d = { .kind=DECL_FUNC, .name=name, .type=t, .pos=pos,
+			.func_d={ body }};
+		return d;
+	}
 	err:;
 		decl d = { .kind = DECL_NONE };
 		return d;
-	}
 }
 
 decls_t parse_module(void)
