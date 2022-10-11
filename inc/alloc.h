@@ -20,7 +20,8 @@ typedef struct allocator {
 
 #define ALLOC(a,size,align) (a)->alloc((a),(size),(align))
 #define REALLOC(a,m,size,align) (a)->realloc((a),(m),(size),(align))
-#define DEALLOC(a,m) (a)->dealloc((a),(m))
+// preprocessor stupid
+#define DEALLOC(a, ...) (a)->dealloc((a),(__VA_ARGS__))
 
 typedef struct {
 	allocator base;
@@ -42,8 +43,9 @@ typedef struct {
 	allocator *upstream;
 } allocator_geom;
 
+// TODO: `m` should be part of allocator_geom
 int allocator_geom_init(allocator_geom *a, allocation m, size_t max_cnt, allocator *upstream);
-void allocator_geom_fini(allocator_geom *a);
+void allocator_geom_fini(allocator_geom *a, allocation *to_free);
 
 #endif /* CROUTE_ALLOC_H */
 

@@ -48,16 +48,17 @@ extern struct global_token_state {
 	const char *cpath;
 	const uint8_t *base;
 	size_t len;
-	map map;
-	dyn_arr line_marks;
-	allocator_geom names;
+	map idents;
+	allocator *up;
+	allocator *names;
+	dyn_arr line_marks; // array of source_pos
 	ident_t kw_func,
 	        kw_int32,
 		kw_return;
-	const void *kw_begin, *kw_end;
+	const uint8_t *keywords_begin, *keywords_end;
 } tokens;
 
-int token_init(const char *path, allocator *up);
+int token_init(const char *path, allocator *up, allocator *names);
 void token_fini(void);
 
 bool token_done(void);

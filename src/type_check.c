@@ -16,13 +16,7 @@ static bool same_type(type_t *L, type_t *R)
 	case TYPE_FUNC:
 		if (!same_type(L->func_t.ret_t, R->func_t.ret_t)) return false;
 		{
-		func_arg *L_params = L->func_t.params.addr, *R_params = R->func_t.params.addr;
-		size_t len = L->func_t.params.len/sizeof(*L_params);
-		if (len != R->func_t.params.len/sizeof(*R_params)) return false;
-		for (size_t i=0; i<len; i++) {
-			if (!same_type(&L_params[i].type, &R_params[i].type)) return false;
-		}
-		return true;
+			assert(0 && "not implemented");
 		}
 	case TYPE_NONE:
 		return false;
@@ -46,7 +40,7 @@ static type_t *type_check_expr(expr *e, map *refs, value_category c)
 	case EXPR_NAME:
 		{
 		decl *from = (decl*) map_find(refs, e->name, string_hash(e->name), _string_cmp2)->v;
-		return &from->type;
+		return from->type;
 		}
 	case EXPR_BINARY:
 		{
@@ -65,7 +59,7 @@ static type_t *type_check_expr(expr *e, map *refs, value_category c)
 		type_t *operand = type_check_expr(e->call.operand, refs, RVALUE);
 		if (!expect_or(operand->kind == TYPE_FUNC,
 				token_source(e->pos), "attempt to call a non-callable:\n")) goto err;
-		assert(operand->func_t.params.len == 0);
+		assert(operand->func_t.params == NULL);
 		return operand->func_t.ret_t;
 		}
 	default:
@@ -83,19 +77,19 @@ static void type_check_stmt(stmt *s, type_t *surrounding, scope *sc)
 {
 	switch (s->kind) {
 	case STMT_EXPR:
-		type_check_expr(&s->e, &sc->refs, RVALUE);
+		type_check_expr(s->e, &sc->refs, RVALUE);
 		return;
 	case STMT_ASSIGN:
-		expect_or(same_type(type_check_expr(&s->assign.L, &sc->refs, LVALUE),
-				    type_check_expr(&s->assign.R, &sc->refs, RVALUE)),
+		expect_or(same_type(type_check_expr(s->assign.L, &sc->refs, LVALUE),
+				    type_check_expr(s->assign.R, &sc->refs, RVALUE)),
 				"attempt to assign between values of different type");
 		return;
 	case STMT_DECL:
-		type_check_decl(&s->d, sc);
+		type_check_decl(s->d, sc);
 		return;
 	case STMT_RETURN:
-		expect_or(same_type(type_check_expr(&s->e, &sc->refs, RVALUE), surrounding),
-				token_source(s->e.pos), "the return value mismatches the return type.\n");
+		expect_or(same_type(type_check_expr(s->e, &sc->refs, RVALUE), surrounding),
+				token_source(s->e->pos), "the return value mismatches the return type.\n");
 		return;
 	default:
 		assert(0);
@@ -104,9 +98,9 @@ static void type_check_stmt(stmt *s, type_t *surrounding, scope *sc)
 
 static void type_check_stmt_block(stmt_block blk, type_t *surrounding, scope *sc)
 {
-	for (stmt *it = blk.addr, *end = it + blk.len/sizeof *it;
+	for (stmt **it = scratch_start(blk), **end = scratch_end(blk);
 			it != end; it++)
-		type_check_stmt(it, surrounding, sc);
+		type_check_stmt(*it, surrounding, sc);
 }
 
 void type_check_decl(decl *d, scope *sc)
@@ -114,14 +108,14 @@ void type_check_decl(decl *d, scope *sc)
 	switch (d->kind) {
 		type_t *type;
 	case DECL_VAR:
-		type = type_check_expr(&d->var_d.init, &sc->refs, RVALUE);
-		expect_or(same_type(&d->type, type),
+		type = type_check_expr(d->var_d.init, &sc->refs, RVALUE);
+		expect_or(same_type(d->type, type),
 				token_source(d->pos), "initializer type does not match target type.\n");
 		break;
 	case DECL_FUNC:
-		assert(d->type.kind == TYPE_FUNC);
-		assert(d->type.func_t.params.len == 0);
-		type_check_stmt_block(d->func_d.body, d->type.func_t.ret_t, sc);
+		assert(d->type->kind == TYPE_FUNC);
+		assert(d->type->func_t.params == NULL);
+		type_check_stmt_block(d->func_d.body, d->type->func_t.ret_t, sc);
 		break;
 	default:
 		assert(0);
@@ -130,11 +124,10 @@ void type_check_decl(decl *d, scope *sc)
 
 void type_check(decls_t decls, scope *top)
 {
-	decl *d = decls.addr;
-	scope *sc = top->sub.addr;
-	size_t len = decls.len/sizeof *d;
-	assert(len == top->sub.len/sizeof *sc);
-	for (size_t i=0; i<len; i++)
-		type_check_decl(&d[i], &sc[i]);
+	decl **decl_it  = scratch_start(decls   ), **decl_end = scratch_end(decls   );
+	scope *scope_it = scratch_start(top->sub), *scope_end = scratch_end(top->sub);
+	assert(decl_end - decl_it == scope_end - scope_it);
+	for (; decl_it != decl_end; decl_it++, scope_it++)
+		type_check_decl(*decl_it, scope_it);
 }
 

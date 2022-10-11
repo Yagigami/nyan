@@ -61,7 +61,7 @@ typedef struct type_t {
 
 typedef struct {
 	ident_t name;
-	type_t type;
+	type_t *type;
 } func_arg;
 
 typedef struct expr {
@@ -70,7 +70,7 @@ typedef struct expr {
 		ident_t name;
 		struct {
 			struct expr *operand;
-			scratch_arr args; // array of expr
+			scratch_arr args; // array of expr*
 		} call;
 		struct {
 			struct expr *L, *R;
@@ -81,15 +81,15 @@ typedef struct expr {
 	source_pos pos;
 } expr;
 
-typedef scratch_arr stmt_block; // array of stmt
+typedef scratch_arr stmt_block; // array of stmt*
 
 typedef struct decl {
 	ident_t name;
-	type_t type;
+	type_t *type;
 	source_pos pos;
 	union {
 		struct {
-			expr init;
+			expr *init;
 		} var_d;
 		struct {
 			stmt_block body;
@@ -100,26 +100,25 @@ typedef struct decl {
 
 typedef struct stmt {
 	union {
-		expr e;
-		struct { expr L, R; } assign;
-		decl d;
+		expr *e;
+		struct { expr *L, *R; } assign;
+		decl *d;
 	};
 	stmt_kind kind;
 } stmt;
 
-typedef scratch_arr decls_t; // array of decl
+typedef scratch_arr decls_t; // array of decl*
 
 extern struct ast_state_t
 {
-	allocator_geom node_a;
-	allocator *general;
+	allocator *temps;
 	size_t errors;
 } ast;
 
-int ast_init(allocator *up, size_t node_pool_size, size_t max_pools);
+int ast_init(allocator *up);
 void ast_fini(void);
 
-decls_t parse_module(void);
+decls_t parse_module(allocator *up);
 
 #define AST_DUP(a,v) ast_dup((a),&(v),sizeof (v))
 

@@ -46,8 +46,11 @@ static int fprint_keyword(FILE *to, ident_t e)
 static int fprint_source_line(FILE *to, const uint8_t *p)
 {
 	size_t line = find_line(p);
-	map_entry *e = tokens.line_marks.buf.addr + line * sizeof *e;
-	return fprintf(to, "%s:%zu:%.*s\n", tokens.cpath, line, (int)(e->v - e->k), (char*) e->k);
+	source_pos *idx_start = tokens.line_marks.buf.addr + line*sizeof *idx_start;
+	const uint8_t *start = token_source(*idx_start);
+	while (*p && *p != '\n') p++;
+	size_t len = (size_t)(p - tokens.base);
+	return fprintf(to, "%s:%zu:%.*s\n", tokens.cpath, line, (int) len, (char*) start);
 }
 
 int _print_impl(FILE *to, uint64_t bitmap, ...)

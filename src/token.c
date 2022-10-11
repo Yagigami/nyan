@@ -25,7 +25,7 @@ static const token_kind token_precedence[TOKEN_NUM] = {
 static ident_t intern_string(const uint8_t *start, size_t len);
 static bool ident_in_range(ident_t chk, const void *L, const void *R);
 
-int token_init(const char *path, allocator *up)
+int token_init(const char *path, allocator *up, allocator *names)
 {
 	int e = map_file_sentinel(path, &tokens.base, &tokens.len);
 	if (!e) {
@@ -37,17 +37,12 @@ int token_init(const char *path, allocator *up)
 			}
 		tokens.lookahead.pos = 0;
 		tokens.lookahead.len = 0;
-		allocation m = ALLOC(up, 0x1000, 0x10);
-		assert(m.addr);
-		e = allocator_geom_init(&tokens.names, m, 24, up);
-		assert(!e);
-		e = map_init(&tokens.map, up, 16);
-		assert(!e);
-		e = dyn_arr_init(&tokens.line_marks, 2*sizeof(map_entry), up);
-		assert(!e);
-		// maybe use a different type at some point lol, it never goes in a map
-		map_entry empty = { .k=(intptr_t)tokens.base, .v=(intptr_t)(tokens.base+tokens.len) };
-		dyn_arr_push(&tokens.line_marks, &empty, sizeof empty);
+		tokens.names = names;
+		tokens.up = up;
+		map_init(&tokens.idents, 2, up);
+		dyn_arr_init(&tokens.line_marks, 2*sizeof(map_entry), up);
+		source_pos first_line = 0;
+		dyn_arr_push(&tokens.line_marks, &first_line, sizeof first_line, up);
 		#define KW(kw) do {\
 			tokens.kw_##kw = intern_string((const uint8_t*) #kw, strlen(#kw)); \
 			} while (0)
@@ -57,8 +52,8 @@ int token_init(const char *path, allocator *up)
 		#undef KW
 
 		// arena grows down
-		tokens.kw_begin = ident_str(tokens.kw_return);
-		tokens.kw_end   = ident_str(tokens.kw_func);
+		tokens.keywords_begin = ident_str(tokens.kw_return);
+		tokens.keywords_end   = ident_str(tokens.kw_func);
 	}
 	token_advance();
 	token_advance();
@@ -85,9 +80,6 @@ again:
 	next.pos = at-tokens.base;
 	const uint8_t *start = at;
 	switch ((next.kind = *at++)) {
-		map_entry line, *last_line;
-		map_entry *arr;
-		const uint8_t *end_offset;
 	case '\0': // sentinel
 	case '+': case '-': case '=': // support += later
 	case ';': case ':': case '(': case ')': case '{': case '}': // always just 1 token
@@ -100,7 +92,8 @@ again:
 			break;
 		}
 		next.processed = intern_string(start, at-start);
-		if (ident_in_range(next.processed, tokens.kw_begin, tokens.kw_end)) next.kind = TOKEN_KEYWORD;
+		if (ident_in_range(next.processed, tokens.keywords_begin, tokens.keywords_end))
+			next.kind = TOKEN_KEYWORD;
 		break;
 	case '0' ... '9':
 		next.kind = TOKEN_INT;
@@ -109,24 +102,17 @@ again:
 		while (isdigit(*at)) next.value = 10*next.value + *at++ - '0';
 		break;
 	case '\n': 
-		arr = tokens.line_marks.buf.addr;
-		last_line = &arr[tokens.line_marks.len-1];
-		line.k = (void*)at;
-		last_line->v = (intptr_t)(at-1);
-		line.v = (intptr_t)tokens.base+tokens.len;
-		dyn_arr_push(&tokens.line_marks, &line, sizeof line);
+		{
+		source_pos line = at - tokens.base;
+		dyn_arr_push(&tokens.line_marks, &line, sizeof line, tokens.up);
 		/* fallthrough */
 	case ' ': case '\t': case '\v': case '\r': case '\f':
-		end_offset = tokens.base + tokens.len;
 		while (isspace(*at))
 			if (*at++ == '\n') {
-				arr = tokens.line_marks.buf.addr;
-				last_line = &arr[tokens.line_marks.len-1];
-				line.k = (void*)at;
-				last_line->v = (intptr_t)(line.k-1);
-				line.v = (intptr_t)end_offset;
-				dyn_arr_push(&tokens.line_marks, &line, sizeof line);
+				line = at - tokens.base;
+				dyn_arr_push(&tokens.line_marks, &line, sizeof line, tokens.up);
 			}
+		}
 		goto again;
 	default:
 		next.kind = TOKEN_ERR_BEGIN;
@@ -159,8 +145,6 @@ bool token_expect(token_kind k)
 	bool r = token_match(k);
 	if (!r) {
 		print(stderr, token_at(), "error, expected token ", k, ", got ", tokens.current, " instead.\n");
-		// fprintf(stderr, "error, expected token %d, got %d `%.*s`.\n", k, tokens.current.kind,
-				// (int) tokens.current.len, (const char*)&tokens.current.start);
 		ast.errors++;
 		token_skip_to_newline();
 	}
@@ -175,7 +159,9 @@ bool lookahead_is(token_kind k)
 void test_token(void)
 {
 	printf("==TOKEN==\n");
-	int e = token_init("cr/basic.cr", &malloc_allocator);
+	allocator_geom names;
+	allocator_geom_init(&names, ALLOC(&malloc_allocator, 0x1000, 0x10), 8, &malloc_allocator);
+	int e = token_init("cr/basic.cr", &malloc_allocator, &names.base);
 	assert(e == 0);
 	do {
 		print(stdout, "\t", tokens.current, "\n");
@@ -185,9 +171,11 @@ void test_token(void)
 		token_advance();
 	} while (!token_done());
 	token_fini();
-	dyn_arr_fini(&tokens.line_marks);
-	map_fini(&tokens.map);
-	allocator_geom_fini(&tokens.names);
+	dyn_arr_fini(&tokens.line_marks, &malloc_allocator);
+	map_fini(&tokens.idents, &malloc_allocator);
+	allocation m;
+	allocator_geom_fini(&names, &m);
+	DEALLOC(&malloc_allocator, m);
 }
 
 size_t string_hash(key_t k)
@@ -210,7 +198,7 @@ static int _string_cmp(key_t L, key_t R)
 
 static key_t _string_insert(key_t from)
 {
-	allocation m = ALLOC(&tokens.names.base, ident_len(from), 1);
+	allocation m = ALLOC(tokens.names, ident_len(from), 1);
 	assert(m.addr);
 	memcpy(m.addr, ident_str(from), ident_len(from));
 	return ident_from(m.addr, ident_len(from));
@@ -218,16 +206,14 @@ static key_t _string_insert(key_t from)
 
 ident_t intern_string(const uint8_t *start, size_t len)
 {
-	map_entry *r = map_id(&tokens.map, ident_from(start, len), string_hash, _string_cmp, _string_insert);
+	map_entry *r = map_id(&tokens.idents, ident_from(start, len), string_hash, _string_cmp, _string_insert, tokens.up);
 	assert(r);
 	return r->k;
 }
 
-static bool ident_equals(ident_t L, ident_t R);
-
 bool token_is_kw(ident_t kw)
 {
-	return tokens.current.kind == TOKEN_KEYWORD && ident_equals(tokens.current.processed, kw);
+	return tokens.current.kind == TOKEN_KEYWORD && tokens.current.processed == kw;
 }
 
 bool token_match_kw(ident_t kw)
@@ -273,27 +259,25 @@ void token_unexpected(void)
 
 size_t find_line(const uint8_t *at)
 {
-	const map_entry *arr = tokens.line_marks.buf.addr;
+	source_pos offset = at - tokens.base;
+	source_pos *arr   = tokens.line_marks.buf.addr;
 	size_t L = 0, R = tokens.line_marks.len;
+	if (offset >= arr[R-1]) return R-1;
 	size_t M;
 	while (true) {
 		M = (L+R)/2;
-		if (at < (uint8_t*)arr[M].k)
-			R = M;
-		else if (at > (uint8_t*)arr[M].v)
-			L = M;
-		else
-			break;
+		if (offset < arr[M]) R = M;
+		else if (offset > arr[M+1]) L = M;
+		else return M;
 	}
-	return M;
 }
 
 void token_skip_to_newline(void)
 {
-	size_t from = find_line(token_at());
-	do {
-		token_advance();
-	} while (from == find_line(token_at()));
+	const uint8_t *at = token_at();
+	do { at++; } while (*at != '\n');
+	token_advance();
+	token_advance();
 }
 
 size_t ident_len(ident_t i) { return (i & IDENT_LEN_MASK) + 1; }

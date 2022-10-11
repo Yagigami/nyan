@@ -5,46 +5,32 @@
 #include <string.h>
 
 
-int dyn_arr_init(dyn_arr *v, size_t cap, allocator *a)
+void dyn_arr_init(dyn_arr *v, size_t cap, allocator *a)
 {
-	int e = -1;
 	v->buf = REALLOC(a, ALLOC_FAILURE, cap, 8);
-	if (!v->buf.addr) goto fail;
 	v->len = 0;
-	v->a = a;
-	e = 0;
-fail:
-	return e;
 }
 
-void dyn_arr_fini(dyn_arr *v)
+void dyn_arr_fini(dyn_arr *v, allocator *a)
 {
-	DEALLOC(v->a, v->buf);
+	DEALLOC(a, v->buf);
 }
 
-static int dyn_arr_resize_if_needed(dyn_arr *v, size_t size)
+static void dyn_arr_resize_if_needed(dyn_arr *v, size_t size, allocator *a)
 {
 	size_t size_after = (v->len + 1)*size;
-	if (size_after <= v->buf.len) return 0;
-	int e = -1;
+	if (size_after <= v->buf.len) return;
 	size_t growth_factor = 2;
 	size_t new_size = growth_factor * v->buf.len;
 	if (new_size < size_after) new_size = size_after;
-	allocation m = REALLOC(v->a, v->buf, new_size, 8);
-	if (!m.addr) goto fail;
-	v->buf = m;
-	e = 0;
-fail:
-	return e;
+	v->buf = REALLOC(a, v->buf, new_size, 8);
 }
 
-void *dyn_arr_push(dyn_arr *v, void *addr, size_t size)
+void *dyn_arr_push(dyn_arr *v, void *addr, size_t size, allocator *a)
 {
-	int e = dyn_arr_resize_if_needed(v, size);
-	assert(!e);
-	void *to = v->buf.addr + v->len*size;
+	dyn_arr_resize_if_needed(v, size, a);
+	void *to = v->buf.addr + v->len++ * size;
 	if (addr) memcpy(to, addr, size);
-	v->len++;
 	return to;
 }
 
@@ -59,8 +45,24 @@ bool dyn_arr_empty(dyn_arr *v)
 	return v->len == 0;
 }
 
-scratch_arr scratch_from(dyn_arr *v, size_t size)
+scratch_arr scratch_from(dyn_arr *v, size_t size, allocator *from, allocator *to)
 {
-	return v->buf = REALLOC(v->a, v->buf, v->len*size, 8);
+	size_t fam_size = v->len * size;
+	if (fam_size == 0) return NULL;
+	allocation transfer = ALLOC(to, sizeof(struct _scratch_arr) + fam_size, 8);
+	scratch_arr res = transfer.addr;
+	memcpy(res->start, v->buf.addr, fam_size);
+	DEALLOC(from, v->buf);
+	res->end = res->start + fam_size;
+	return res;
 }
 
+void scratch_fini(scratch_arr s, allocator *a)
+{
+	if (!s) return;
+	allocation m = { .addr=s, .len=(size_t)(s->end - (void*)s) };
+	DEALLOC(a, m);
+}
+
+void *scratch_start(scratch_arr s) { return s? s->start: NULL; }
+void *scratch_end  (scratch_arr s) { return s? s->end  : NULL; }

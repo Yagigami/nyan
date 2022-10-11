@@ -15,20 +15,19 @@ typedef struct {
 } map_entry;
 
 typedef struct {
-	allocator *a;
 	allocation m;
 	size_t cnt;
 } map;
 
-int map_init(map *map, allocator *a, size_t cap);
-void map_fini(map *map);
+int map_init(map *map, size_t cap, allocator *a);
+void map_fini(map *map, allocator *a);
 
 typedef size_t (*map_hash)(key_t k);
 typedef int (*map_cmp)(key_t L, key_t R);
 typedef key_t (*map_insert)(key_t k);
-map_entry *map_id(map *map, key_t k, map_hash hash, map_cmp cmp, map_insert insert);
+map_entry *map_id(map *map, key_t k, map_hash hash, map_cmp cmp, map_insert insert, allocator *a);
 map_entry *map_find(map *map, key_t k, size_t h, map_cmp cmp);
-map_entry *map_add(map *map, key_t k, map_hash hash);
+map_entry *map_add(map *map, key_t k, map_hash hash, allocator *a);
 
 #endif /* CROUTE_MAP_H */
 

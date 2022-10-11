@@ -72,6 +72,8 @@ allocation allocator_malloc(allocator *a, size_t size, size_t align)
 allocation allocator_realloc(allocator *a, allocation m, size_t size, size_t align)
 {
 	assert(a == &malloc_allocator);
+	// shut up leak-san
+	if (!size) return ALLOC_FAILURE;
 	assert(align <= 16);
 	void *addr = realloc(m.addr, size);
 	return ALLOC_SUCCESS(addr, size);
@@ -228,7 +230,7 @@ end:
 	return e;
 }
 
-void allocator_geom_fini(allocator_geom *a)
+void allocator_geom_fini(allocator_geom *a, allocation *to_free)
 {
 	for (allocator_arena *arena=&a->arr[1]; arena != &a->arr[a->cnt]; arena++) {
 		allocator_arena_fini(arena);
@@ -239,5 +241,7 @@ void allocator_geom_fini(allocator_geom *a)
 		allocator_arena_fini(arena);
 		DEALLOC(a->upstream, ALLOC_SUCCESS(arena->start, arena->end-arena->start));
 	}
+	to_free->addr = a->arr;
+	to_free->len  = a->max_cnt * sizeof *a->arr;
 }
 
