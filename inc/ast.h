@@ -78,7 +78,7 @@ typedef struct expr {
 		} binary;
 	};
 	expr_kind kind;
-	source_pos pos;
+	source_idx pos;
 } expr;
 
 typedef scratch_arr stmt_block; // array of stmt*
@@ -86,7 +86,7 @@ typedef scratch_arr stmt_block; // array of stmt*
 typedef struct decl {
 	ident_t name;
 	type_t *type;
-	source_pos pos;
+	source_idx pos;
 	union {
 		struct {
 			expr *init;

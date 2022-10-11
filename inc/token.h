@@ -10,20 +10,13 @@
 #include "dynarr.h"
 
 
-typedef uintptr_t ident_t;
+typedef intptr_t ident_t;
 
-ident_t ident_from(const uint8_t *start, size_t len);
+ident_t ident_from(const char *start, size_t len);
 size_t ident_len(ident_t i);
-const uint8_t *ident_str(ident_t i);
+const char *ident_str(ident_t i);
 
-typedef size_t source_pos;
-
-typedef struct {
-	source_pos pos;
-	uint64_t len;
-	uint64_t kind;
-	union { ident_t processed; uint64_t value; };
-} token;
+typedef int32_t source_idx;
 
 typedef enum {
 	TOKEN_END = '\0',
@@ -41,21 +34,29 @@ typedef enum {
 	TOKEN_NUM
 } token_kind;
 
+typedef struct {
+	union { ident_t processed; uint64_t value; };
+	source_idx pos;
+	source_idx end;
+	token_kind kind;
+} token;
+
 // a compiler is called on 1 file. globals are fine
 extern struct global_token_state {
 	token current;
 	token lookahead;
 	const char *cpath;
-	const uint8_t *base;
-	size_t len;
+	const char *base;
+	source_idx len;
 	map idents;
-	allocator *up;
+	allocator *up; // allows the token_* functions not to take an allocator parameter just for line_marks and idents
 	allocator *names;
-	dyn_arr line_marks; // array of source_pos
+	dyn_arr line_marks; // array of source_idx
 	ident_t kw_func,
 	        kw_int32,
 		kw_return;
-	const uint8_t *keywords_begin, *keywords_end;
+	ident_t placeholder;
+	const char *keywords_begin, *keywords_end;
 } tokens;
 
 int token_init(const char *path, allocator *up, allocator *names);
@@ -77,14 +78,14 @@ bool lookahead_is_kw(ident_t kw);
 bool token_match_precedence(token_kind p);
 void token_unexpected(void);
 
-const uint8_t *token_at(void);
-size_t find_line(const uint8_t *at);
+const char *token_at(void);
+source_idx find_line(source_idx offset);
 void token_skip_to_newline(void);
 
 size_t string_hash(key_t k);
 
-source_pos token_pos(void);
-const uint8_t *token_source(source_pos pos);
+source_idx token_pos(void);
+const char *token_source(source_idx pos);
 
 #endif /* CROUTE_TOKEN_H */
 

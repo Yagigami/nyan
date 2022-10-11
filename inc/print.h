@@ -20,6 +20,8 @@ void print_fini(void);
 #if false // works as if defined like this // 8 variable arguments at max
 int print(FILE *to, ...);
 bool expect_or(bool condition, ...);
+// TODO:
+// change to void error(...); and bool error_if(cond, ...);
 #endif
 #define print(to,...) _print_impl((to), \
 		((MSK(__VA_ARGS__))<<ARGS_SHIFT)|NUM_ARGS(_, ## __VA_ARGS__), \
@@ -40,7 +42,7 @@ static_assert(P_END < (1<<PRINTABLE_SHIFT), "increase PRINTABLE_SHIFT");
 #define FMT(x) (_Generic((x), \
 			char* /* JUST C THINGS LOL */: P_STRING, \
 			ident_t : P_KEYWORD, \
-			const uint8_t* : P_SOURCE_LINE, \
+			source_idx : P_SOURCE_LINE, \
 			token : P_TOKEN, \
 			token_kind : P_TOKEN_KIND \
 			))

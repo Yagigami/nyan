@@ -5,8 +5,14 @@
 #include <stdint.h>
 
 
-int map_file_sentinel(const char *cstr, const uint8_t **view, size_t *len);
-int unmap_file_sentinel(const uint8_t *view, size_t len);
+enum io_status {
+	IO_OS_ERR = -1,
+	IO_OK = 0,
+	IO_BIG_FILE = 1,
+};
+
+int map_file_sentinel(const char *cstr, const char **view, size_t *len);
+int unmap_file_sentinel(const char *view, size_t len);
 
 #endif /* CROUTE_FILE_H */
 

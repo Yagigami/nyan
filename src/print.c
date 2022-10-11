@@ -8,19 +8,20 @@
 
 static int fprint_token(FILE *to, token tk)
 {
+	int len = tk.end - tk.pos;
 	switch (tk.kind) {
 	case TOKEN_NAME:
-		return fprintf(to, "n'%.*s'", (int) ident_len(tk.processed), (char*) ident_str(tk.processed));
+		return fprintf(to, "n'%.*s'", (int) ident_len(tk.processed), ident_str(tk.processed));
 	case TOKEN_KEYWORD:
-		return fprintf(to, "k'%.*s'", (int) ident_len(tk.processed), (char*) ident_str(tk.processed));
+		return fprintf(to, "k'%.*s'", (int) ident_len(tk.processed), ident_str(tk.processed));
 	case TOKEN_INT:
 		return fprintf(to, "#%lu", tk.value);
 	case TOKEN_ERR_LONG_NAME:
-		return fprintf(to, "`%.*s` (too long with %zu characters)", (int) tk.len, (char*) tokens.base+tk.pos, (size_t) tk.len);
+		return fprintf(to, "`%.*s` (too long with %d characters)", len, token_source(tk.pos), len);
 	default:
 		return isprint(tk.kind) ?
-			fprintf(to, "'%c'", (int) tk.kind) :
-			fprintf(to, "`%.*s`", (int) tk.len, (char*) tokens.base+tk.pos);
+			fprintf(to, "'%c'", tk.kind) :
+			fprintf(to, "`%.*s`", len, token_source(tk.pos));
 	}
 }
 
@@ -40,17 +41,18 @@ static int fprint_token_kind(FILE *to, token_kind k)
 
 static int fprint_keyword(FILE *to, ident_t e)
 {
-	return fprintf(to, "'%.*s'", (int) ident_len(e), (char*) ident_str(e));
+	return fprintf(to, "'%.*s'", (int) ident_len(e), ident_str(e));
 }
 
-static int fprint_source_line(FILE *to, const uint8_t *p)
+static int fprint_source_line(FILE *to, source_idx offset)
 {
-	size_t line = find_line(p);
-	source_pos *idx_start = tokens.line_marks.buf.addr + line*sizeof *idx_start;
-	const uint8_t *start = token_source(*idx_start);
-	while (*p && *p != '\n') p++;
-	size_t len = (size_t)(p - tokens.base);
-	return fprintf(to, "%s:%zu:%.*s\n", tokens.cpath, line, (int) len, (char*) start);
+	source_idx line = find_line(offset);
+	source_idx *idx_start = tokens.line_marks.buf.addr + line*sizeof *idx_start;
+	const char *start = token_source(*idx_start);
+	const char *end = token_source(offset);
+	while (*end && *end != '\n') end++;
+	source_idx len = (source_idx)(end - start);
+	return fprintf(to, "%s:%d:%.*s\n", tokens.cpath, line, len, start);
 }
 
 int _print_impl(FILE *to, uint64_t bitmap, ...)
@@ -74,7 +76,7 @@ int _print_impl(FILE *to, uint64_t bitmap, ...)
 		printed += fprint_keyword(to, va_arg(args, ident_t));
 		break;
 	case P_SOURCE_LINE:
-		printed += fprint_source_line(to, va_arg(args, uint8_t*));
+		printed += fprint_source_line(to, va_arg(args, source_idx));
 		break;
 	default:
 		__builtin_unreachable();

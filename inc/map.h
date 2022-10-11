@@ -8,7 +8,7 @@
 
 // k is nonnull on a valid kay, and null on a sentinel key
 // v can be anything
-typedef uintptr_t key_t, val_t;
+typedef intptr_t key_t, val_t;
 typedef struct {
 	key_t k;
 	val_t v;

@@ -58,7 +58,7 @@ expr *parse_expr_atom(allocator *up)
 		atom->kind = EXPR_INT;
 		atom->value = snapshot.value;
 	} else
-		expect_or(false, token_source(atom->pos), "invalid operand to expression.\n"),
+		expect_or(false, atom->pos, "invalid operand to expression.\n"),
 		atom->kind = EXPR_NONE;
 	return atom;
 }
@@ -130,9 +130,8 @@ type_t *parse_type_prim(allocator *up)
 		prim->kind = TYPE_PRIMITIVE;
 		prim->name = tokens.kw_int32;
 	} else {
-		print(stderr, token_at(), "unknown type ", tokens.current, "\n");
-		ast.errors++;
-		token_skip_to_newline();
+		if (!expect_or(false, token_pos(), "unknown type ", tokens.current, "\n"))
+			token_skip_to_newline();
 		prim->kind = TYPE_NONE;
 	}
 	return prim;
@@ -216,13 +215,13 @@ decl *parse_decl(allocator *up)
 		d->kind = DECL_VAR;
 		d->type = parse_type(up);
 		if (!expect_or(d->type->kind != TYPE_FUNC,
-			token_source(d->pos), "function types are not prefixed by ':'.\n")) goto err;
+			d->pos, "function types are not prefixed by ':'.\n")) goto err;
 		if (!token_expect('=')) goto err;
 		d->var_d.init = parse_expr(up);
 		if (!token_expect(';')) goto err;
 		return d;
 	} else if (expect_or((d->type = parse_type(up))->kind == TYPE_FUNC,
-				token_source(d->pos), "a function type was expected here.\n")) {
+				d->pos, "a function type was expected here.\n")) {
 		d->kind = DECL_FUNC;
 		d->func_d.body = parse_stmt_block(up);
 	} else {

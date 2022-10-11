@@ -31,7 +31,7 @@ static void resolve_expr(expr *e, map *refs, allocator *up)
 			for (scope **start = scopes.stack.buf.addr, **it = start + scopes.stack.len-1;
 					!name && it >= start; it--)
 				name = map_find(&it[0]->refs, e->name, h, _string_cmp2);
-			if (expect_or(name != NULL, token_source(e->pos), "the identifier ", e->name, 
+			if (expect_or(name != NULL, e->pos, "the identifier ", e->name, 
 						"is used but never defined.\n"))
 				*map_add(refs, e->name, string_hash, up) = *name;
 		}
@@ -62,8 +62,8 @@ static void resolve_simple_decl(decl *d, map *refs, allocator *up)
 {
 	map_entry *e = map_id(refs, d->name, string_hash, _string_cmp2, _string_insert2, up);
 	if (!expect_or(e->v == 0,
-		token_source(d->pos), "the symbol ", d->name, " tried to shadow the declaration:\n",
-		token_source( (*(decl*) e->v).pos ), "in the same scope.\n")) return;
+		d->pos, "the symbol ", d->name, " tried to shadow the declaration:\n",
+		(*(decl*) e->v).pos  , "in the same scope.\n")) return;
 	e->v = (val_t)d;
 	switch (d->kind) {
 	case DECL_VAR:
@@ -86,7 +86,7 @@ static void resolve_func(decl *f, scope *to, allocator *up)
 		switch (s->kind) {
 		case STMT_DECL:
 			if (!expect_or(s->d->kind != DECL_FUNC,
-				token_source(s->d->pos), "the function is nested, which is disallowed.\n")) continue;
+				s->d->pos, "the function is nested, which is disallowed.\n")) continue;
 			resolve_simple_decl(s->d, &to->refs, up);
 			break;
 		case STMT_ASSIGN:
@@ -121,8 +121,8 @@ void resolve_refs(decls_t of, scope *to, allocator *up, allocator *final)
 			map_entry *e = map_id(&to->refs, d->name, string_hash, _string_cmp2, _string_insert2, up);
 			assert(e);
 			if (!expect_or(e->v == 0,
-				token_source(d->pos), "the symbol ", d->name, " is redeclared here.\n",
-				token_source( (*(decl*) e->v).pos ), "it was previously declared here.\n")) continue;
+				d->pos, "the symbol ", d->name, " is redeclared here.\n",
+				(*(decl*) e->v).pos, "it was previously declared here.\n")) continue;
 			e->v = (val_t)d;
 			scope *addr = dyn_arr_push(&subscopes, NULL, sizeof *addr, up);
 			resolve_func(d, addr, up);
