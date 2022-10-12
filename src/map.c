@@ -20,6 +20,12 @@ void map_fini(map *map, allocator *a)
 	DEALLOC(a, map->m);
 }
 
+void map_clear(map *map)
+{
+	map->cnt = 0;
+	memset(map->m.addr, 0, map->m.len);
+}
+
 map_entry *map_rehash_if_needed(map *map, map_entry *watch, map_hash hash, allocator *a)
 {
 	size_t cap = map->m.len/sizeof(map_entry);

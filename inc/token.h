@@ -10,6 +10,8 @@
 #include "dynarr.h"
 
 
+// TODO: make this a source_idx (the length can always be retrieved while reading, or be the values kept in the map)
+// one day maybe
 typedef intptr_t ident_t;
 
 ident_t ident_from(const char *start, size_t len);

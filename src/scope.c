@@ -46,9 +46,8 @@ static void resolve_expr(expr *e, map *refs, allocator *up)
 	case EXPR_CALL:
 		resolve_expr(e->call.operand, refs, up);
 		for (expr **it = scratch_start(e->call.args), **end = scratch_end(e->call.args);
-				it != end; it++) {
+				it != end; it++)
 			resolve_expr(*it, refs, up);
-		}
 		break;
 	case EXPR_BINARY:
 		resolve_expr(e->binary.L, refs, up);
@@ -149,7 +148,6 @@ decl *ref2decl(val_t v)
 idx_t ref2idx(val_t v)
 {
 	idx_t i = (idx_t) v;
-	assert(i >= 0);
 	return i;
 }
 
