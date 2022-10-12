@@ -36,16 +36,13 @@ extern allocator malloc_allocator; // general-purpose
 
 typedef struct {
 	allocator base;
-	allocator_arena *arr;
-	size_t max_cnt;
+	allocation arenas;
 	size_t cnt;
-	size_t biggest;
 	allocator *upstream;
 } allocator_geom;
 
-// TODO: `m` should be part of allocator_geom
-int allocator_geom_init(allocator_geom *a, allocation m, size_t max_cnt, allocator *upstream);
-void allocator_geom_fini(allocator_geom *a, allocation *to_free);
+int allocator_geom_init(allocator_geom *a, size_t max_cnt, size_t align, size_t init_size, allocator *upstream);
+void allocator_geom_fini(allocator_geom *a);
 
 #endif /* CROUTE_ALLOC_H */
 

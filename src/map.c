@@ -2,6 +2,7 @@
 
 #include <string.h>
 #include <assert.h>
+#include <stdbool.h>
 
 
 int map_init(map *map, size_t cap, allocator *a)
@@ -48,7 +49,7 @@ map_entry *map_rehash_if_needed(map *map, map_entry *watch, map_hash hash, alloc
 	return watch;
 }
 
-map_entry *map_id(map *map, key_t k, map_hash hash, map_cmp cmp, map_insert insert, allocator *a)
+map_entry *map_id(map *map, key_t k, map_hash hash, map_cmp cmp, bool *inserted, allocator *a)
 {
 	size_t cap = map->m.len / sizeof(map_entry);
 	assert(cap >= 2);
@@ -56,13 +57,15 @@ map_entry *map_id(map *map, key_t k, map_hash hash, map_cmp cmp, map_insert inse
 	for (size_t i=h%cap;; i = (i+1) % cap) {
 		map_entry *e = map->m.addr + i*sizeof *e;
 		if (!e->k) {
-			e->k = insert(k);
+			e->k = k; // you can always overwrite this later if you need special functionality
+			*inserted = true;
 			map->cnt++;
 			return map_rehash_if_needed(map, e, hash, a);
 		}
 		// maybe omit
 		if (hash(e->k) != h) continue;
 		if (cmp(e->k, k) != 0) continue;
+		*inserted = false;
 		return e;
 	}
 }
@@ -94,7 +97,7 @@ map_entry *map_add(map *map, key_t k, map_hash hash, allocator *a)
 
 static size_t test_hash(key_t e);
 static int test_cmp(key_t L, key_t R);
-static key_t test_insert(key_t e);
+static key_t test_insert(key_t k);
 
 void test_map(void)
 {
@@ -102,20 +105,27 @@ void test_map(void)
 	allocator *up = &malloc_allocator;
 	int e = map_init(&m, 2, up);
 	assert(e == 0);
-	map_entry *pa  = map_id(&m, (uintptr_t) "aaa", test_hash, test_cmp, test_insert, up);
+	bool inserted;
+	map_entry *pa  = map_id(&m, (uintptr_t) "aaa", test_hash, test_cmp, &inserted, up);
+	if (inserted) pa->k = test_insert(pa->k);
 	pa->v = 3;
 	map_entry a = *pa;
-	map_entry *pb  = map_id(&m, (uintptr_t) "bbbbb", test_hash, test_cmp, test_insert, up);
+	map_entry *pb  = map_id(&m, (uintptr_t) "bbbbb", test_hash, test_cmp, &inserted, up);
+	if (inserted) pb->k = test_insert(pb->k);
 	pb->v = 5;
 	map_entry b = *pb;
-	map_entry *pa2 = map_id(&m, (uintptr_t) "aaa", test_hash, test_cmp, test_insert, up);
+	map_entry *pa2 = map_id(&m, (uintptr_t) "aaa", test_hash, test_cmp, &inserted, up);
+	if (inserted) pa2->k = test_insert(pa2->k);
 	map_entry a2 = *pa2;
-	map_entry *pc  = map_id(&m, (uintptr_t) "c", test_hash, test_cmp, test_insert, up);
+	map_entry *pc  = map_id(&m, (uintptr_t) "c", test_hash, test_cmp, &inserted, up);
+	if (inserted) pc->k = test_insert(pc->k);
 	pc->v = 1;
 	map_entry c = *pc;
-	map_entry *pb2 = map_id(&m, (uintptr_t) "bbbbb", test_hash, test_cmp, test_insert, up);
+	map_entry *pb2 = map_id(&m, (uintptr_t) "bbbbb", test_hash, test_cmp, &inserted, up);
+	if (inserted) pb2->k = test_insert(pb2->k);
 	map_entry b2 = *pb2;
-	map_entry *pa3 = map_id(&m, (uintptr_t) "aaa", test_hash, test_cmp, test_insert, up);
+	map_entry *pa3 = map_id(&m, (uintptr_t) "aaa", test_hash, test_cmp, &inserted, up);
+	if (inserted) pa3->k = test_insert(pa3->k);
 	map_entry a3 = *pa3;
 	assert(a.k == a2.k && a.k == a3.k && a3.v == 3);
 	assert(b.k == b2.k && b2.v == 5);

@@ -8,6 +8,9 @@
 #include "map.h"
 
 
+typedef int32_t idx_t;
+typedef idx_t decl_idx;
+
 typedef enum {
 	TYPE_NONE,
 	TYPE_PRIMITIVE,
@@ -102,23 +105,25 @@ typedef struct stmt {
 	union {
 		expr *e;
 		struct { expr *L, *R; } assign;
-		decl *d;
+		decl_idx d;
 	};
 	stmt_kind kind;
 } stmt;
 
-typedef scratch_arr decls_t; // array of decl*
+typedef scratch_arr module_t; // array of decl_idx
 
 extern struct ast_state_t
 {
 	allocator *temps;
 	size_t errors;
+	dyn_arr decls; // array of decl*
 } ast;
 
 int ast_init(allocator *up);
-void ast_fini(void);
+void ast_fini(allocator *up);
 
-decls_t parse_module(allocator *up);
+module_t parse_module(allocator *up);
+decl *idx2decl(decl_idx i);
 
 #define AST_DUP(a,v) ast_dup((a),&(v),sizeof (v))
 

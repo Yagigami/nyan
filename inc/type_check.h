@@ -5,7 +5,10 @@
 #include "ast.h"
 #include "scope.h"
 
-void type_check(decls_t decls, scope *top);
+
+typedef enum { RVALUE, LVALUE } value_category;
+
+void type_check(module_t module, scope *top);
 
 #endif /* CROUTE_TYPE_CHECK_H */
 

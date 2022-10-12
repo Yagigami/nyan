@@ -14,16 +14,18 @@ int ast_init(allocator *up)
 {
 	ast.temps = up;
 	ast.errors = 0;
+	dyn_arr_init(&ast.decls, 0*sizeof(decl*), up);
 	return 0;
 }
 
-void ast_fini(void)
+void ast_fini(allocator *up)
 {
+	dyn_arr_fini(&ast.decls, up);
 }
 
 static stmt *parse_stmt(allocator *up);
 static stmt_block parse_stmt_block(allocator *up);
-static decl *parse_decl(allocator *up);
+static decl_idx parse_decl(allocator *up);
 
 static expr *parse_expr(allocator *up);
 static expr *parse_expr_atom(allocator *up);
@@ -34,6 +36,22 @@ static type_t *parse_type(allocator *up);
 static type_t *parse_type_prim(allocator *up);
 static type_t *parse_type_target(type_t *base, allocator *up);
 static void parse_type_params(dyn_arr *p, allocator *up);
+
+typedef struct {
+	decl *ptr;
+	decl_idx i;
+} decl_assoc;
+
+static decl_assoc new_decl(allocator *a, source_idx pos, ident_t name)
+{
+	decl *d = ALLOC(a, sizeof *d, 8).addr;
+	d->kind = DECL_NONE;
+	d->name = name;
+	d->pos  = pos ;
+	decl_assoc pair = { .ptr=d, .i=ast.decls.len };
+	dyn_arr_push(&ast.decls, &d, sizeof d, ast.temps);
+	return pair;
+}
 
 void *ast_dup(allocator *a, void *addr, size_t size)
 {
@@ -204,12 +222,11 @@ stmt_block parse_stmt_block(allocator *up)
 	return scratch_from(&body, sizeof(stmt*), ast.temps, up);
 }
 
-decl *parse_decl(allocator *up)
+decl_idx parse_decl(allocator *up)
 {
-	decl *d = ALLOC(up, sizeof *d, 8).addr;
 	token snapshot = tokens.current;
-	d->pos = snapshot.pos;
-	d->name = snapshot.processed;
+	decl_assoc pair = new_decl(up, snapshot.pos, snapshot.processed);
+	decl *d = pair.ptr;
 	if (!token_expect(TOKEN_NAME)) goto err;
 	if (token_match(':')) { // var decl
 		d->kind = DECL_VAR;
@@ -219,7 +236,7 @@ decl *parse_decl(allocator *up)
 		if (!token_expect('=')) goto err;
 		d->var_d.init = parse_expr(up);
 		if (!token_expect(';')) goto err;
-		return d;
+		return pair.i;
 	} else if (expect_or((d->type = parse_type(up))->kind == TYPE_FUNC,
 				d->pos, "a function type was expected here.\n")) {
 		d->kind = DECL_FUNC;
@@ -228,18 +245,18 @@ decl *parse_decl(allocator *up)
 	err:
 		d->kind = DECL_NONE;
 	}
-	return d;
+	return pair.i;
 }
 
-decls_t parse_module(allocator *up)
+module_t parse_module(allocator *up)
 {
 	dyn_arr m;
 	dyn_arr_init(&m, 0*sizeof(decl*), ast.temps);
 	do {
-		decl *d = parse_decl(up);
-		dyn_arr_push(&m, &d, sizeof (decl*), ast.temps);
+		decl_idx d = parse_decl(up);
+		dyn_arr_push(&m, &d, sizeof d, ast.temps);
 	} while (!token_done());
-	return scratch_from(&m, sizeof(decl*), ast.temps, up);
+	return scratch_from(&m, sizeof(decl_idx), ast.temps, up);
 }
 
 void test_ast(void)
@@ -247,29 +264,33 @@ void test_ast(void)
 	// TODO: change print a bit
 	extern int printf(const char *, ...);
 	printf("==AST==\n");
-	ast_init(&malloc_allocator);
-	allocation m = ALLOC(&malloc_allocator, 0x1000, 0x10);
+	allocator *gpa = &malloc_allocator;
+	ast_init(gpa);
 	allocator_geom perma;
-	allocator_geom_init(&perma, m, 16, &malloc_allocator);
+	allocator_geom_init(&perma, 16, 8, 0x100, gpa);
 	token_init("cr/basic.cr", ast.temps, &perma.base);
-	decls_t decls = parse_module(&perma.base);
+	module_t module = parse_module(&perma.base);
 	scope global;
-	resolve_init(1, &malloc_allocator);
-	resolve_refs(decls, &global, ast.temps, &perma.base);
-	resolve_fini(&malloc_allocator);
-	type_check(decls, &global);
+	resolve_init(1, gpa);
+	resolve_refs(module, &global, ast.temps, &perma.base);
+	resolve_fini(gpa);
+	type_check(module, &global);
 
 	for (scope *it = scratch_start(global.sub), *end = scratch_end(global.sub);
 			it != end; it++)
 		map_fini(&it->refs, ast.temps);
 	map_fini(&global.refs, ast.temps);
 
-	dyn_arr_fini(&tokens.line_marks, ast.temps);
-	map_fini(&tokens.idents, ast.temps);
 	token_fini();
-	allocator_geom_fini(&perma, &m);
-	DEALLOC(&malloc_allocator, m);
-	ast_fini();
+	allocator_geom_fini(&perma);
+	ast_fini(gpa);
 	if (!ast.errors) printf("  no news is good news.\n");
+}
+
+decl *idx2decl(decl_idx i)
+{
+	assert(0 <= i && i < (decl_idx) ast.decls.len);
+	decl **base = ast.decls.buf.addr;
+	return base[i];
 }
 

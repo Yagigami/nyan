@@ -6,8 +6,6 @@
 
 static type_t type_missing;
 
-typedef enum { RVALUE, LVALUE } value_category;
-
 // TODO: use an intern map
 static bool same_type(type_t *L, type_t *R)
 {
@@ -45,12 +43,11 @@ static type_t *type_check_expr(expr *e, map *refs, value_category c)
 	case EXPR_NAME:
 		{
 		map_entry *entry = map_find(refs, e->name, string_hash(e->name), _string_cmp2);
-		if (entry) {
-			decl *from = (decl*) entry->v;
-			return from->type;
-		} else {
+		if (entry)
+			return ref2decl(entry->v)->type;
+		else
 			return &type_missing;
-		}
+
 		}
 	case EXPR_BINARY:
 		{
@@ -83,7 +80,7 @@ err:;
 	return &type_err;
 }
 
-static void type_check_decl(decl *d, scope *sc);
+static void type_check_decl(decl_idx i, scope *sc);
 
 static void type_check_stmt(stmt *s, type_t *surrounding, scope *sc)
 {
@@ -117,8 +114,9 @@ static void type_check_stmt_block(stmt_block blk, type_t *surrounding, scope *sc
 		type_check_stmt(*it, surrounding, sc);
 }
 
-void type_check_decl(decl *d, scope *sc)
+void type_check_decl(decl_idx i, scope *sc)
 {
+	decl *d = idx2decl(i);
 	switch (d->kind) {
 		type_t *type;
 	case DECL_VAR:
@@ -138,10 +136,10 @@ void type_check_decl(decl *d, scope *sc)
 	}
 }
 
-void type_check(decls_t decls, scope *top)
+void type_check(module_t module, scope *top)
 {
-	decl **decl_it  = scratch_start(decls   ), **decl_end = scratch_end(decls   );
-	scope *scope_it = scratch_start(top->sub), *scope_end = scratch_end(top->sub);
+	decl_idx *decl_it = scratch_start(module)  , *decl_end = scratch_end(module   );
+	scope *scope_it   = scratch_start(top->sub), *scope_end = scratch_end(top->sub);
 	assert(decl_end - decl_it == scope_end - scope_it);
 	for (; decl_it != decl_end; decl_it++, scope_it++)
 		type_check_decl(*decl_it, scope_it);

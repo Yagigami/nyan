@@ -19,7 +19,11 @@ void resolve_fini(allocator *up)
 // the strings here are already interned
 // I hecking love C's int comparisons batchest
 static int _string_cmp2(key_t L, key_t R) { return L-R; }
-static key_t _string_insert2(key_t k) { return k; }
+
+static val_t idx_pair(decl_idx d, idx_t i)
+{
+	return (val_t) d << 32 | (uint32_t) i;
+}
 
 static void resolve_expr(expr *e, map *refs, allocator *up)
 {
@@ -58,13 +62,15 @@ static void resolve_expr(expr *e, map *refs, allocator *up)
 	}
 }
 
-static void resolve_simple_decl(decl *d, map *refs, allocator *up)
+static void resolve_simple_decl(decl_idx i, map *refs, allocator *up)
 {
-	map_entry *e = map_id(refs, d->name, string_hash, _string_cmp2, _string_insert2, up);
+	decl *d = idx2decl(i);
+	bool inserted;
+	map_entry *e = map_id(refs, d->name, string_hash, _string_cmp2, &inserted, up);
 	if (!expect_or(e->v == 0,
 		d->pos, "the symbol ", d->name, " tried to shadow the declaration:\n",
-		(*(decl*) e->v).pos  , "in the same scope.\n")) return;
-	e->v = (val_t)d;
+		ref2decl(e->v)->pos  , "in the same scope.\n")) return;
+	e->v = idx_pair(i, -1);
 	switch (d->kind) {
 	case DECL_VAR:
 		resolve_expr(d->var_d.init, refs, up);
@@ -85,8 +91,8 @@ static void resolve_func(decl *f, scope *to, allocator *up)
 		stmt *s = *it;
 		switch (s->kind) {
 		case STMT_DECL:
-			if (!expect_or(s->d->kind != DECL_FUNC,
-				s->d->pos, "the function is nested, which is disallowed.\n")) continue;
+			if (!expect_or(idx2decl(s->d)->kind != DECL_FUNC,
+				idx2decl(s->d)->pos, "the function is nested, which is disallowed.\n")) continue;
 			resolve_simple_decl(s->d, &to->refs, up);
 			break;
 		case STMT_ASSIGN:
@@ -107,23 +113,23 @@ static void resolve_func(decl *f, scope *to, allocator *up)
 	// to->sub = scratch_from(&subscopes, sizeof(scope));
 }
 
-void resolve_refs(decls_t of, scope *to, allocator *up, allocator *final)
+void resolve_refs(module_t of, scope *to, allocator *up, allocator *final)
 {
-	decl **start = scratch_start(of), **end = scratch_end(of);
+	decl_idx *start = scratch_start(of), *end = scratch_end(of);
 	size_t n = end - start;
 	map_init(&to->refs, n >= 2? n: 2, up);
 	dyn_arr_push(&scopes.stack, &to, sizeof to, up);
 	dyn_arr subscopes;
 	dyn_arr_init(&subscopes, n*sizeof(scope), up); // this one is special because we never reallocate
-	for (decl **it = start; it != end; it++) {
-		decl *d = *it;
+	for (decl_idx *it = start; it != end; it++) {
+		decl *d = idx2decl(*it);
 		if (d->kind == DECL_FUNC) {
-			map_entry *e = map_id(&to->refs, d->name, string_hash, _string_cmp2, _string_insert2, up);
-			assert(e);
+			bool inserted;
+			map_entry *e = map_id(&to->refs, d->name, string_hash, _string_cmp2, &inserted, up);
 			if (!expect_or(e->v == 0,
 				d->pos, "the symbol ", d->name, " is redeclared here.\n",
-				(*(decl*) e->v).pos, "it was previously declared here.\n")) continue;
-			e->v = (val_t)d;
+				ref2decl(e->v)->pos, "it was previously declared here.\n")) continue;
+			e->v = idx_pair(*it, it - start);
 			scope *addr = dyn_arr_push(&subscopes, NULL, sizeof *addr, up);
 			resolve_func(d, addr, up);
 		} else {
@@ -132,5 +138,18 @@ void resolve_refs(decls_t of, scope *to, allocator *up, allocator *final)
 	}
 	dyn_arr_pop(&scopes.stack);
 	to->sub = scratch_from(&subscopes, sizeof(scope), up, final);
+}
+
+decl *ref2decl(val_t v)
+{
+	assert(v >= 0);
+	return idx2decl(v >> 32);
+}
+
+idx_t ref2idx(val_t v)
+{
+	idx_t i = (idx_t) v;
+	assert(i >= 0);
+	return i;
 }
 

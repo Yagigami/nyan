@@ -166,33 +166,34 @@ void allocator_arena_fini(allocator_arena *a)
 	(void) a;
 }
 
+static size_t arena_size(allocator_arena *a)
+{
+	return a->end - a->start;
+}
+
 allocation allocator_geom_alloc(allocator *a_, size_t size, size_t align)
 {
 	allocator_geom *a = (allocator_geom*)a_;
-	for (int i=a->cnt-1; i>=0; i--) {
-		allocation m = ALLOC(&a->arr[i].base, size, align);
+	for (allocator_arena *start = a->arenas.addr, *end = start + a->cnt, *it = end-1;
+			it >= start; it--) {
+		allocation m = ALLOC(&it->base, size, align);
 		if (m.addr) return m;
 	}
-	if (a->cnt == a->max_cnt) return ALLOC_FAILURE;
-	allocator_arena *arena = &a->arr[a->cnt++];
-	allocation buffer;
-	size_t mask = PAGE_SIZE-1;
-	size_t aligned = align > PAGE_SIZE? (align+mask) & ~mask: PAGE_SIZE;
-	if (size > 2*a->biggest) {
-		buffer = ALLOC(a->upstream, size, aligned);
-	} else {
-		a->biggest *= 2;
-		buffer = ALLOC(a->upstream, a->biggest, aligned);
-	}
+	if ((a->cnt+1) * sizeof(allocator_arena) >= a->arenas.len)
+		return ALLOC_FAILURE;
+	allocator_arena *arenas = a->arenas.addr, *next = &arenas[a->cnt++];
+	size_t next_size = 2 * arena_size(&next[-1]);
+	allocation buffer = ALLOC(a->upstream, next_size > size? next_size: size, align);
 	if (!buffer.addr) return ALLOC_FAILURE;
-	allocator_arena_init(arena, buffer);
-	return ALLOC(&arena->base, size, aligned);
+	allocator_arena_init(next, buffer);
+	return ALLOC(&next->base, size, align);
 }
 
 allocation allocator_geom_realloc(allocator *a_, allocation m, size_t size, size_t align)
 {
 	allocator_geom *a = (allocator_geom*)a_;
-	allocation try = REALLOC(&a->arr[a->cnt-1].base, m, size, align);
+	allocator_arena *arenas = a->arenas.addr, *end = arenas + a->cnt;
+	allocation try = REALLOC(&end[-1].base, m, size, align);
 	if (try.addr) return try;
 	try = allocator_geom_alloc(a_, size, align);
 	if (!try.addr) return ALLOC_FAILURE;
@@ -205,43 +206,28 @@ void allocator_geom_dealloc(allocator *a_, allocation m)
 	(void) a_, (void) m;
 }
 
-int allocator_geom_init(allocator_geom *a, allocation m, size_t max_cnt, allocator *upstream)
+int allocator_geom_init(allocator_geom *a, size_t max_cnt, size_t align, size_t init_size, allocator *upstream)
 {
-	assert(m.len >= PAGE_SIZE);
+	// assert(m.len >= PAGE_SIZE);
 	a->base.alloc   = allocator_geom_alloc;
 	a->base.realloc = allocator_geom_realloc;
 	a->base.dealloc = allocator_geom_dealloc;
-	a->arr = m.addr;
-	a->max_cnt = max_cnt;
-	assert(max_cnt <= m.len/sizeof *a->arr);
-	a->biggest = m.len - max_cnt * sizeof *a->arr;
-	int e = -1;
-	if (a->biggest == 0) {
-		a->biggest = PAGE_SIZE;
-		allocation ar = ALLOC(upstream, a->biggest, 16);
-		if (!ar.addr) goto end;
-		e = allocator_arena_init(&a->arr[0], ar);
-	} else {
-		e = allocator_arena_init(&a->arr[0], ALLOC_SUCCESS(m.addr + max_cnt * sizeof *a->arr, a->biggest));
-	}
+	a->arenas = ALLOC(upstream, max_cnt * sizeof(allocator_arena), align);
+	allocator_arena *arenas = a->arenas.addr;
+	int e = allocator_arena_init(&arenas[0], ALLOC(upstream, init_size, align));
 	a->cnt = 1;
 	a->upstream = upstream;
-end:
 	return e;
 }
 
-void allocator_geom_fini(allocator_geom *a, allocation *to_free)
+void allocator_geom_fini(allocator_geom *a)
 {
-	for (allocator_arena *arena=&a->arr[1]; arena != &a->arr[a->cnt]; arena++) {
-		allocator_arena_fini(arena);
-		DEALLOC(a->upstream, ALLOC_SUCCESS(arena->start, arena->end-arena->start));
+	for (allocator_arena *it = a->arenas.addr, *end = it + a->cnt;
+			it != end; it++) {
+		allocator_arena_fini(it);
+		allocation m = { it->start, arena_size(it) };
+		DEALLOC(a->upstream, m);
 	}
-	if (a->arr[0].end-a->arr[0].start + a->max_cnt * sizeof *a->arr > PAGE_SIZE) {
-		allocator_arena *arena = &a->arr[0];
-		allocator_arena_fini(arena);
-		DEALLOC(a->upstream, ALLOC_SUCCESS(arena->start, arena->end-arena->start));
-	}
-	to_free->addr = a->arr;
-	to_free->len  = a->max_cnt * sizeof *a->arr;
+	DEALLOC(a->upstream, a->arenas);
 }
 

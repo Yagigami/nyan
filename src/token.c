@@ -2,6 +2,7 @@
 #include "ast.h"
 #include "print.h"
 #include "file.h"
+#include "alloc.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -22,7 +23,7 @@ static const token_kind token_precedence[TOKEN_NUM] = {
 	['+'] = '+', ['-'] = '+',
 };
 
-static ident_t intern_string(const char *start, size_t len);
+static ident_t intern_string(source_idx start, size_t len);
 static bool ident_in_range(ident_t chk, const void *L, const void *R);
 
 int token_init(const char *path, allocator *up, allocator *names)
@@ -42,14 +43,21 @@ int token_init(const char *path, allocator *up, allocator *names)
 		dyn_arr_init(&tokens.line_marks, 2*sizeof(source_idx), up);
 		source_idx first_line = 0;
 		dyn_arr_push(&tokens.line_marks, &first_line, sizeof first_line, up);
-		#define KW(kw) do {\
-			tokens.kw_##kw = intern_string(#kw, sizeof(#kw)-1); \
+		#define INSERT(NAME,STR) do {\
+			map_entry *e = map_add(&tokens.idents, (key_t) STR, string_hash, tokens.up); \
+			allocation m = ALLOC(tokens.names, sizeof(STR), 1); \
+			memcpy(m.addr, STR, sizeof(STR)); \
+			tokens.NAME = e->k = (key_t) m.addr; \
+			e->v = sizeof(STR)-1; \
 			} while (0)
+		#define KW(name) INSERT(kw_##name, #name)
 		KW(func);
 		KW(int32);
 		KW(return);
+
+		INSERT(placeholder, "<missing>");
 		#undef KW
-		tokens.placeholder = intern_string("<missing>", sizeof("<missing>")-1);
+		#undef INSERT
 
 		// arena grows down
 		tokens.keywords_begin = ident_str(tokens.kw_return);
@@ -62,6 +70,9 @@ int token_init(const char *path, allocator *up, allocator *names)
 
 void token_fini(void)
 {
+	map_fini(&tokens.idents, tokens.up);
+	dyn_arr_fini(&tokens.line_marks, tokens.up);
+	// names persist
 	int e = unmap_file_sentinel(tokens.base, tokens.len);
 	assert(e == 0);
 }
@@ -91,7 +102,7 @@ again:
 			next.kind = TOKEN_ERR_LONG_NAME;
 			break;
 		}
-		next.processed = intern_string(start, at - start);
+		next.processed = intern_string(next.pos, at - start);
 		if (ident_in_range(next.processed, tokens.keywords_begin, tokens.keywords_end))
 			next.kind = TOKEN_KEYWORD;
 		break;
@@ -156,8 +167,9 @@ void test_token(void)
 {
 	printf("==TOKEN==\n");
 	allocator_geom names;
-	allocator_geom_init(&names, ALLOC(&malloc_allocator, 0x1000, 0x10), 8, &malloc_allocator);
-	int e = token_init("cr/basic.cr", &malloc_allocator, &names.base);
+	allocator *gpa = &malloc_allocator;
+	allocator_geom_init(&names, 8, 8, 0x10, gpa);
+	int e = token_init("cr/basic.cr", gpa, &names.base);
 	assert(e == 0);
 	do {
 		print(stdout, "\t", tokens.current, "\n");
@@ -167,43 +179,38 @@ void test_token(void)
 		token_advance();
 	} while (!token_done());
 	token_fini();
-	dyn_arr_fini(&tokens.line_marks, &malloc_allocator);
-	map_fini(&tokens.idents, &malloc_allocator);
-	allocation m;
-	allocator_geom_fini(&names, &m);
-	DEALLOC(&malloc_allocator, m);
+	allocator_geom_fini(&names);
 }
 
 size_t string_hash(key_t k)
 {
 	size_t h = 0x23be1793daa2779fU;
-	const char *start = ident_str(k), *end = start + ident_len(k);
-	for (const char *c=start; c != end; c++) h = h*15 ^ (*c * h);
+	for (const char *c = (char*) k; isalpha(*c); c++)
+		h = h*15 ^ (*c * h);
 	return h;
 }
 
 static int _string_cmp(key_t L, key_t R)
 {
-	if (ident_len(L) != ident_len(R)) return ident_len(L) - ident_len(R);
-	const char *lc=ident_str(L), *rc=ident_str(R), *lend = lc + ident_len(L);
-	for (; lc != lend; lc++, rc++) {
+	const char *lc=ident_str(L), *rc=ident_str(R);
+	for (; isalpha(*lc) && isalpha(*rc); lc++, rc++) {
 		if (*lc != *rc) return *lc - *rc;
 	}
 	return 0;
 }
 
-static key_t _string_insert(key_t from)
+ident_t intern_string(source_idx start, size_t len)
 {
-	allocation m = ALLOC(tokens.names, ident_len(from), 1);
-	assert(m.addr);
-	memcpy(m.addr, ident_str(from), ident_len(from));
-	return ident_from(m.addr, ident_len(from));
-}
-
-ident_t intern_string(const char *start, size_t len)
-{
-	map_entry *r = map_id(&tokens.idents, ident_from(start, len), string_hash, _string_cmp, _string_insert, tokens.up);
+	bool inserted;
+	key_t k = (key_t) token_source(start);
+	map_entry *r = map_id(&tokens.idents, k, string_hash, _string_cmp, &inserted, tokens.up);
 	assert(r);
+	if (inserted) {
+		allocation m = ALLOC(tokens.names, len, 1);
+		memcpy(m.addr, token_source(start), len);
+		r->k = k;
+		r->v = len;
+	}
 	return r->k;
 }
 
@@ -270,17 +277,10 @@ void token_skip_to_newline(void)
 	token_advance();
 }
 
-size_t ident_len(ident_t i) { return (i & IDENT_LEN_MASK) + 1; }
-const char *ident_str(ident_t i) { return (char*)(i >> IDENT_SHIFT); }
+size_t ident_len(ident_t i) { return map_find(&tokens.idents, i, string_hash(i), _string_cmp)->v; }
+const char *ident_str(ident_t i) { return (char*) i; }
 bool ident_in_range(ident_t chk, const void *L, const void *R) { return L <= (void*) ident_str(chk) && (void*) ident_str(chk) <= R; }
 bool ident_equals(ident_t L, ident_t R) { return L == R; }
-
-ident_t ident_from(const char *start, size_t len)
-{
-	size_t lenm1 = len-1;
-	assert((lenm1 & ~IDENT_LEN_MASK) == 0 && "identifier too long or 0-length");
-	return ((uintptr_t)start << IDENT_SHIFT) | lenm1;
-}
 
 source_idx token_pos(void)
 {
