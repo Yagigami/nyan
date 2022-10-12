@@ -11,7 +11,7 @@
 typedef int32_t idx_t;
 typedef idx_t decl_idx;
 
-typedef enum {
+typedef enum type_kind {
 	TYPE_NONE,
 	TYPE_PRIMITIVE,
 	TYPE_FUNC,
@@ -19,7 +19,7 @@ typedef enum {
 	TYPE_END = TYPE_FUNC
 } type_kind;
 
-typedef enum {
+typedef enum decl_kind {
 	DECL_NONE,
 	DECL_VAR,
 	DECL_FUNC,
@@ -27,7 +27,7 @@ typedef enum {
 	DECL_END = DECL_FUNC
 } decl_kind;
 
-typedef enum {
+typedef enum stmt_kind {
 	STMT_NONE,
 	STMT_EXPR,
 	STMT_ASSIGN,
@@ -37,7 +37,7 @@ typedef enum {
 	STMT_END = STMT_RETURN
 } stmt_kind;
 
-typedef enum {
+typedef enum expr_kind {
 	EXPR_NONE,
 	EXPR_INT,
 	EXPR_NAME,
@@ -62,7 +62,7 @@ typedef struct type_t {
 	type_kind kind;
 } type_t;
 
-typedef struct {
+typedef struct func_arg {
 	ident_t name;
 	type_t *type;
 } func_arg;

@@ -29,7 +29,7 @@ bool expect_or(bool condition, ...);
 		## __VA_ARGS__)
 #define expect_or(cond, ...) ((cond) ? true: (print(stderr, ## __VA_ARGS__), ast.errors++, false)) // STUPID PRECEDENCE RULES LOL
 
-typedef enum {
+typedef enum printable {
 	P_STRING,
 	P_KEYWORD,
 	P_SOURCE_LINE,

@@ -10,12 +10,12 @@
 // k is nonnull on a valid kay, and null on a sentinel key
 // v can be anything
 typedef intptr_t key_t, val_t;
-typedef struct {
+typedef struct map_entry {
 	key_t k;
 	val_t v;
 } map_entry;
 
-typedef struct {
+typedef struct map {
 	allocation m;
 	size_t cnt;
 } map;

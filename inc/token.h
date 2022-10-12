@@ -20,7 +20,7 @@ const char *ident_str(ident_t i);
 
 typedef int32_t source_idx;
 
-typedef enum {
+typedef enum token_kind {
 	TOKEN_END = '\0',
 
 	TOKEN_ERR_BEGIN = 1,
@@ -36,7 +36,7 @@ typedef enum {
 	TOKEN_NUM
 } token_kind;
 
-typedef struct {
+typedef struct token {
 	union { ident_t processed; uint64_t value; };
 	source_idx pos;
 	source_idx end;

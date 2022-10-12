@@ -4,13 +4,13 @@
 #include <stddef.h>
 
 
-typedef struct {
+typedef struct allocation {
 	void *addr;
-	size_t len;
+	size_t size;
 } allocation;
 
-#define ALLOC_FAILURE (allocation){ .addr=NULL, .len=0 }
-#define ALLOC_SUCCESS(a,s) (allocation){ .addr=(a), .len=(s) }
+#define ALLOC_FAILURE (allocation){ .addr=NULL, .size=0 }
+#define ALLOC_SUCCESS(a,s) (allocation){ .addr=(a), .size=(s) }
 
 typedef struct allocator {
 	allocation (*alloc)  (struct allocator *a, size_t size, size_t align);
@@ -23,7 +23,7 @@ typedef struct allocator {
 // preprocessor stupid
 #define DEALLOC(a, ...) (a)->dealloc((a),(__VA_ARGS__))
 
-typedef struct {
+typedef struct allocator_arena {
 	allocator base;
 	void *start, *cur_low, *low_lim, *cur_high, *end;
 } allocator_arena;
@@ -34,7 +34,7 @@ void allocator_arena_fini(allocator_arena *a);
 extern allocator system_allocator;
 extern allocator malloc_allocator; // general-purpose
 
-typedef struct {
+typedef struct allocator_geom {
 	allocator base;
 	allocation arenas;
 	size_t cnt;

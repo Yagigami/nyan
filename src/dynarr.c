@@ -19,9 +19,9 @@ void dyn_arr_fini(dyn_arr *v, allocator *a)
 static void dyn_arr_resize_if_needed(dyn_arr *v, size_t size, allocator *a)
 {
 	size_t size_after = (v->len + 1)*size;
-	if (size_after <= v->buf.len) return;
+	if (size_after <= v->buf.size) return;
 	size_t growth_factor = 2;
-	size_t new_size = growth_factor * v->buf.len;
+	size_t new_size = growth_factor * v->buf.size;
 	if (new_size < size_after) new_size = size_after;
 	v->buf = REALLOC(a, v->buf, new_size, 8);
 }
@@ -60,7 +60,7 @@ scratch_arr scratch_from(dyn_arr *v, size_t size, allocator *from, allocator *to
 void scratch_fini(scratch_arr s, allocator *a)
 {
 	if (!s) return;
-	allocation m = { .addr=s, .len=(size_t)(s->end - (void*)s) };
+	allocation m = { .addr=s, .size=(size_t)(s->end - (void*)s) };
 	DEALLOC(a, m);
 }
 

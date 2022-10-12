@@ -124,7 +124,7 @@ static void conv3ac_func(decl *d, ssa_sym *to, scope *sc, allocator *a)
 	ssa_ref next = 0;
 
 	// transfer from sc to refs
-	for (map_entry *it = sc->refs.m.addr, *end = it + sc->refs.m.len/sizeof *it;
+	for (map_entry *it = sc->refs.m.addr, *end = it + sc->refs.m.size/sizeof *it;
 			it != end; it++) {
 		if (!it->k) continue;
 		idx_t idx = ref2idx(it->v);

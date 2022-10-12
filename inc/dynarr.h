@@ -8,7 +8,7 @@
 #include "alloc.h"
 
 
-typedef struct {
+typedef struct dyn_arr {
 	allocation buf; // assumed to represent `void *buf.addr[buf.len/sizeof(T)];`
 	size_t len; // number of T
 	allocator *a;

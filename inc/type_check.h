@@ -6,7 +6,7 @@
 #include "scope.h"
 
 
-typedef enum { RVALUE, LVALUE } value_category;
+typedef enum value_category { RVALUE, LVALUE } value_category;
 
 void type_check(module_t module, scope *top);
 

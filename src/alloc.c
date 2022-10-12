@@ -26,22 +26,22 @@ allocation allocator_system_realloc(allocator *a_, allocation m, size_t size, si
 {
 	assert(a_ == &system_allocator);
 	size_t mask = PAGE_SIZE-1;
-	assert((m.len & mask) == 0 && ((intptr_t)m.addr & mask) == 0);
+	assert((m.size & mask) == 0 && ((intptr_t)m.addr & mask) == 0);
 	size_t rounded = (size + mask) & ~mask;
 	assert(align <= PAGE_SIZE);
-	if (rounded == m.len) return m;
-	if (rounded < m.len) {
-		int e = munmap(m.addr+rounded, m.len-rounded);
+	if (rounded == m.size) return m;
+	if (rounded < m.size) {
+		int e = munmap(m.addr+rounded, m.size-rounded);
 		assert(e == 0);
 		return ALLOC_SUCCESS(m.addr, rounded);
 	}
-	void *addr = mmap(m.addr+m.len, rounded-m.len, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE, -1, 0);
+	void *addr = mmap(m.addr+m.size, rounded-m.size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE, -1, 0);
 	if (addr != MAP_FAILED) return ALLOC_SUCCESS(m.addr, rounded);
 	// if (errno != EEXIST) return ALLOC_FAILURE;
 	addr = mmap(NULL, rounded, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
 	if (addr == MAP_FAILED) return ALLOC_FAILURE;
-	memcpy(addr, m.addr, m.len);
-	int e = munmap(m.addr, m.len);
+	memcpy(addr, m.addr, m.size);
+	int e = munmap(m.addr, m.size);
 	assert(e == 0);
 	return ALLOC_SUCCESS(addr, rounded);
 }
@@ -50,8 +50,8 @@ void allocator_system_dealloc(allocator *a_, allocation m)
 {
 	assert(a_ == &system_allocator);
 	size_t mask = PAGE_SIZE-1;
-	assert((m.len & mask) == 0 && ((intptr_t)m.addr & mask) == 0);
-	int e = munmap(m.addr, m.len);
+	assert((m.size & mask) == 0 && ((intptr_t)m.addr & mask) == 0);
+	int e = munmap(m.addr, m.size);
 	assert(e == 0);
 }
 
@@ -126,19 +126,19 @@ allocation allocator_arena_realloc(allocator *a_, allocation m, size_t size, siz
 		a->cur_low = a->low_lim;
 		a->low_lim = a->cur_low + size;
 		return ALLOC_SUCCESS(a->cur_low, size);
-	} else if (m.addr == a->cur_low && m.addr+m.len == a->low_lim) {
+	} else if (m.addr == a->cur_low && m.addr+m.size == a->low_lim) {
 		if(a->cur_low + size <= a->cur_high) {
 			a->low_lim = a->cur_low + size;
 			return ALLOC_SUCCESS(a->cur_low, size);
 		}
 	}
 slow:
-	if (size < m.len) return ALLOC_SUCCESS(m.addr, size);
+	if (size < m.size) return ALLOC_SUCCESS(m.addr, size);
 	intptr_t ilim = (intptr_t)a->low_lim;
 	ilim = (ilim + mask) & ~mask;
 	void *next = (void*) ilim;
 	if (next + size > a->cur_high) return ALLOC_FAILURE;
-	memcpy(next, m.addr, m.len);
+	memcpy(next, m.addr, m.size);
 	a->low_lim = next + size;
 	a->cur_low = next;
 	return ALLOC_SUCCESS(next, size);
@@ -156,7 +156,7 @@ int allocator_arena_init(allocator_arena *a, allocation m)
 	a->base.realloc = allocator_arena_realloc;
 	a->base.dealloc = allocator_arena_dealloc;
 	a->start = a->cur_low  = m.addr;
-	a->end   = a->cur_high = m.addr + m.len;
+	a->end   = a->cur_high = m.addr + m.size;
 	a->low_lim = a->start;
 	return 0;
 }
@@ -179,7 +179,7 @@ allocation allocator_geom_alloc(allocator *a_, size_t size, size_t align)
 		allocation m = ALLOC(&it->base, size, align);
 		if (m.addr) return m;
 	}
-	if ((a->cnt+1) * sizeof(allocator_arena) >= a->arenas.len)
+	if ((a->cnt+1) * sizeof(allocator_arena) >= a->arenas.size)
 		return ALLOC_FAILURE;
 	allocator_arena *arenas = a->arenas.addr, *next = &arenas[a->cnt++];
 	size_t next_size = 2 * arena_size(&next[-1]);
@@ -197,7 +197,7 @@ allocation allocator_geom_realloc(allocator *a_, allocation m, size_t size, size
 	if (try.addr) return try;
 	try = allocator_geom_alloc(a_, size, align);
 	if (!try.addr) return ALLOC_FAILURE;
-	memcpy(try.addr, m.addr, try.len<m.len? try.len: m.len);
+	memcpy(try.addr, m.addr, try.size<m.size? try.size: m.size);
 	return try;
 }
 
@@ -208,7 +208,7 @@ void allocator_geom_dealloc(allocator *a_, allocation m)
 
 int allocator_geom_init(allocator_geom *a, size_t max_cnt, size_t align, size_t init_size, allocator *upstream)
 {
-	// assert(m.len >= PAGE_SIZE);
+	// assert(m.size >= PAGE_SIZE);
 	a->base.alloc   = allocator_geom_alloc;
 	a->base.realloc = allocator_geom_realloc;
 	a->base.dealloc = allocator_geom_dealloc;

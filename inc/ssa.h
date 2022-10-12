@@ -30,14 +30,13 @@ enum ssa_opcode
 };
 
 // 3-address
-typedef union
-{
+typedef union ssa_instr {
 	struct { ssa_kind kind; ssa_ref to, L, R; };
 	ssa_extension v;
 } ssa_instr;
 static_assert(sizeof (ssa_instr) == sizeof (ssa_extension), "");
 
-typedef struct {
+typedef struct ssa_sym {
 	ident_t name;
 	idx_t idx;
 	union {

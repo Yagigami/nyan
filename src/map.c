@@ -10,7 +10,7 @@ int map_init(map *map, size_t cap, allocator *a)
 	size_t size = cap * sizeof(map_entry);
 	map->m = ALLOC(a, size, 16u);
 	if (!map->m.addr) return -1;
-	memset(map->m.addr, 0, map->m.len);
+	memset(map->m.addr, 0, map->m.size);
 	map->cnt = 0;
 	return 0;
 }
@@ -23,23 +23,23 @@ void map_fini(map *map, allocator *a)
 void map_clear(map *map)
 {
 	map->cnt = 0;
-	memset(map->m.addr, 0, map->m.len);
+	memset(map->m.addr, 0, map->m.size);
 }
 
 map_entry *map_rehash_if_needed(map *map, map_entry *watch, map_hash hash, allocator *a)
 {
-	size_t cap = map->m.len/sizeof(map_entry);
-	if (map->cnt < cap/2) return watch;
+	size_t cap = map->m.size/sizeof(map_entry);
+	if (map->cnt + 1 <= cap) return watch;
 	size_t growth_factor = 2;
 	size_t size_after = map->cnt * sizeof(map_entry);
-	size_t new_size = growth_factor*map->m.len;
+	size_t new_size = growth_factor*map->m.size;
 	if (new_size < size_after) new_size = size_after;
 	allocation m = ALLOC(a, new_size, 16);
 	assert(m.addr);
 	if (!m.addr) return NULL;
-	memset(m.addr, 0, m.len);
-	size_t new_cap = m.len/sizeof(map_entry);
-	for (map_entry *e = map->m.addr; e != map->m.addr+map->m.len; e++) {
+	memset(m.addr, 0, m.size);
+	size_t new_cap = m.size/sizeof(map_entry);
+	for (map_entry *e = map->m.addr; e != map->m.addr+map->m.size; e++) {
 		if (!e->k) continue;
 		size_t h = hash(e->k);
 		map_entry *new_e;
@@ -57,7 +57,7 @@ map_entry *map_rehash_if_needed(map *map, map_entry *watch, map_hash hash, alloc
 
 map_entry *map_id(map *map, key_t k, map_hash hash, map_cmp cmp, bool *inserted, allocator *a)
 {
-	size_t cap = map->m.len / sizeof(map_entry);
+	size_t cap = map->m.size / sizeof(map_entry);
 	assert(cap >= 2);
 	size_t h = hash(k);
 	for (size_t i=h%cap;; i = (i+1) % cap) {
@@ -78,7 +78,7 @@ map_entry *map_id(map *map, key_t k, map_hash hash, map_cmp cmp, bool *inserted,
 
 map_entry *map_find(map *map, key_t k, size_t h, map_cmp cmp)
 {
-	size_t cap = map->m.len / sizeof(map_entry);
+	size_t cap = map->m.size / sizeof(map_entry);
 	if (!cap) return NULL;
 	for (size_t i = h%cap;; i = (i+1) % cap) {
 		map_entry *e = map->m.addr + i*sizeof *e;
@@ -93,7 +93,7 @@ map_entry *map_add(map *map, key_t k, map_hash hash, allocator *a)
 	map->cnt++;
 	map_rehash_if_needed(map, NULL, hash, a);
 	size_t h = hash(k);
-	size_t cap = map->m.len / sizeof(map_entry);
+	size_t cap = map->m.size / sizeof(map_entry);
 	for (size_t i = h%cap;; i = (i+1) % cap) {
 		map_entry *e = map->m.addr + i*sizeof *e;
 		if (e->k) continue;
@@ -136,9 +136,9 @@ void test_map(void)
 	assert(a.k == a2.k && a.k == a3.k && a3.v == 3);
 	assert(b.k == b2.k && b2.v == 5);
 	assert(c.v == 1);
-	DEALLOC(up, (allocation){ .addr=(void*) a.k, .len=a.v });
-	DEALLOC(up, (allocation){ .addr=(void*) b.k, .len=b.v });
-	DEALLOC(up, (allocation){ .addr=(void*) c.k, .len=c.v });
+	DEALLOC(up, (allocation){ .addr=(void*) a.k, .size=a.v });
+	DEALLOC(up, (allocation){ .addr=(void*) b.k, .size=b.v });
+	DEALLOC(up, (allocation){ .addr=(void*) c.k, .size=c.v });
 	map_fini(&m, up);
 }
 
