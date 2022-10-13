@@ -28,11 +28,15 @@ SRC = $(filter-out $(MAIN),$(shell find src -name "*.c"))
 INC = $(shell find $(INCPATH) -name "*.h")
 OBJ = $(patsubst src/%.c,$(OUT)/%.o,$(SRC))
 
-.PHONY: clean test
-all: $(OUT)/$(TEST) $(OUT)/$(BIN)
+.PHONY: clean test dump
+all: $(OUT)/$(TEST) $(OUT)/$(BIN) dump
 
 test: $(OUT)/$(TEST)
 	$<
+
+dump: $(OUT)/$(TEST)
+	$<
+	objdump -Dwb binary -m i386 -M x86-64 --insn-width=12 $@
 
 $(OUT)/$(TEST): $(OUT)/$(TEST).o $(OBJ)
 	@echo LD $<
@@ -44,11 +48,12 @@ $(OUT)/$(BIN): $(OUT)/$(BIN).o $(OBJ)
 
 # TODO: cf. ../Makefile for more granular include deps
 $(OUT)/%.o: src/%.c $(INC)
+	@mkdir -p $(dir $@)
 	@echo CC $<
 	@$(CC) $(CFLAGS) $< -c -o $@
 
 clean:
 	@echo CLEAN
-	@rm -rf $(OBJ) $(OUT)/$(TEST)* $(OUT)/$(BIN)*
+	@rm -rf $(OUT)
 
 

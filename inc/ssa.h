@@ -25,6 +25,8 @@ enum ssa_opcode
 	SSA_GLOBAL_REF, // 1 extension
 	SSA_COPY,
 	SSA_RET,
+	SSA_PROLOGUE,
+	SSA_EPILOGUE,
 
 	SSA_NUM
 };
@@ -37,16 +39,18 @@ typedef union ssa_instr {
 static_assert(sizeof (ssa_instr) == sizeof (ssa_extension), "");
 
 typedef scratch_arr ins_buf; // array of ssa_instr
-typedef ins_buf (*ssa_pass)(ins_buf src, allocator *a);
 typedef struct ssa_sym {
 	ident_t name;
 	idx_t idx;
 	ins_buf ins;
+	ssa_ref num;
 } ssa_sym;
 
 typedef scratch_arr ssa_module; // array of ssa_sym
 
 ssa_module convert_to_3ac(module_t module, scope *sc, allocator *a);
+
+typedef ins_buf (*ssa_pass)(ins_buf src, allocator *a);
 void ssa_run_pass(ssa_module mod, ssa_pass pass, allocator *a);
 
 int dump_3ac(ssa_module module);

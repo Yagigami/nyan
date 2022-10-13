@@ -6,9 +6,16 @@
 #include "map.h"
 #include "token.h"
 #include "print.h"
+// TODO: remove
+#include "gen/x86-64.h"
 
 #include <assert.h>
 #include <stdbool.h>
+// TODO: remove
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 
 
@@ -42,6 +49,7 @@ static ssa_ref conv3ac_expr(expr *e, map *refs, dyn_arr *ins, ssa_ref *next, all
 		buf[1] = (ssa_instr){ .v = e->value & ((1LU<<32) - 1) };
 		buf[2] = (ssa_instr){ .v = e->value >> 32 };
 		assert(sizeof (ssa_extension) == sizeof (uint32_t) && "adapt this a bit");
+		dyn_arr_push(ins, buf, 3*sizeof *buf, a);
 		return buf[0].to;
 	case EXPR_NAME:
 		{
@@ -107,7 +115,10 @@ static void conv3ac_stmt(stmt *s, map *refs, dyn_arr *ins, ssa_ref *next, alloca
 	case STMT_RETURN:
 		{
 		ssa_ref r = conv3ac_expr(s->e, refs, ins, next, a, RVALUE);
-		ssa_instr i = { .kind=SSA_RET, r };
+		ssa_instr i = { .kind=SSA_EPILOGUE };
+		dyn_arr_push(ins, &i, sizeof i, a);
+		i.kind = SSA_RET;
+		i.L = r;
 		dyn_arr_push(ins, &i, sizeof i, a);
 		}
 		break;
@@ -122,6 +133,8 @@ static void conv3ac_func(decl *d, ssa_sym *to, scope *sc, allocator *a)
 	map_clear(&ssa.refs);
 	dyn_arr ins;
 	dyn_arr_init(&ins, 0*sizeof(ssa_instr), a);
+	ssa_instr prologue = { .kind=SSA_PROLOGUE };
+	dyn_arr_push(&ins, &prologue, sizeof prologue, a);
 	ssa_ref next = 0;
 
 	// transfer from sc to refs
@@ -144,6 +157,7 @@ static void conv3ac_func(decl *d, ssa_sym *to, scope *sc, allocator *a)
 		conv3ac_stmt(*it, &ssa.refs, &ins, &next, a);
 	}
 	to->ins = scratch_from(&ins, sizeof(ssa_instr), a, a);
+	to->num = next;
 }
 
 ssa_module convert_to_3ac(module_t module, scope *sc, allocator *a)
@@ -181,6 +195,8 @@ static ins_buf pass_2ac(ins_buf src, allocator *a)
 		case SSA_CALL:
 		case SSA_COPY:
 		case SSA_RET:
+		case SSA_PROLOGUE:
+		case SSA_EPILOGUE:
 			// nop
 			assert(it != end);
 			dyn_arr_push(&dst, it, sizeof *it, a);
@@ -235,6 +251,19 @@ void test_3ac(void)
 		ssa_module ssa_3ac = convert_to_3ac(module, &global, gpa);
 		ssa_run_pass(ssa_3ac, pass_2ac, gpa);
 		dump_3ac(ssa_3ac);
+
+		gen_module g = gen_x86_64(ssa_3ac, gpa);
+		int fd = open("dump", O_WRONLY|O_CREAT, S_IRUSR|S_IWUSR);
+		if (fd == -1) perror("open");
+		for (gen_sym *sym = scratch_start(g), *end = scratch_end(g);
+				sym != end; sym++) {
+			ssize_t r = write(fd, scratch_start(sym->ins), scratch_end(sym->ins) - scratch_start(sym->ins));
+			if (r < 0) perror("write");
+			scratch_fini(sym->refs, gpa);
+			scratch_fini(sym->ins, gpa);
+		}
+		close(fd);
+		scratch_fini(g, gpa);
 
 		for (ssa_sym *sym = scratch_start(ssa_3ac), *end = scratch_end(ssa_3ac);
 				sym != end; sym++)

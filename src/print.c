@@ -84,6 +84,10 @@ static int fprint_3acinstr(FILE *to, ssa_instr *i, int *extra_offset)
 		return fprintf(to, "%%%hhx = %%%hhx\n", i->to, i->L);
 	case SSA_RET:
 		return fprintf(to, "ret %%%hhx\n", i->to);
+	case SSA_PROLOGUE:
+		return fprintf(to, "enter\n");
+	case SSA_EPILOGUE:
+		return fprintf(to, "leave\n");
 	default:
 		assert(0);
 	}
