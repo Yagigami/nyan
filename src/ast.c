@@ -54,7 +54,8 @@ static decl_assoc new_decl(allocator *a, source_idx pos, ident_t name)
 	d->kind = DECL_NONE;
 	d->name = name;
 	d->pos  = pos ;
-	decl_assoc pair = { .ptr=d, .i=ast.decls.len };
+	idx_t i = ast.decls.end - ast.decls.buf.addr;
+	decl_assoc pair = { .ptr=d, .i=i/sizeof(decl*) };
 	dyn_arr_push(&ast.decls, &d, sizeof d, ast.temps);
 	return pair;
 }
@@ -295,7 +296,7 @@ void test_ast(void)
 
 decl *idx2decl(decl_idx i)
 {
-	assert(0 <= i && i < (decl_idx) ast.decls.len);
+	assert(0 <= i && i < (ast.decls.end - ast.decls.buf.addr) / (int) sizeof (decl*));
 	decl **base = ast.decls.buf.addr;
 	return base[i];
 }

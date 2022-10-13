@@ -36,9 +36,9 @@ static void resolve_expr(expr *e, map *refs, allocator *up)
 		{
 			size_t h = string_hash(e->name);
 			map_entry *name = map_find(refs, e->name, h, _string_cmp2);
-			for (scope **start = scopes.stack.buf.addr, **it = start + scopes.stack.len-1;
-					!name && it >= start; it--)
-				name = map_find(&it[0]->refs, e->name, h, _string_cmp2);
+			for (scope **start = scopes.stack.buf.addr, **it = scopes.stack.end;
+					!name && it > start; it--)
+				name = map_find(&it[-1]->refs, e->name, h, _string_cmp2);
 			if (expect_or(name != NULL, e->pos, "the identifier ", e->name, 
 						"is used but never defined.\n"))
 				*map_add(refs, e->name, string_hash, up) = *name;
@@ -137,7 +137,7 @@ void resolve_refs(module_t of, scope *to, allocator *up, allocator *final)
 			if (!expect_or(false, "non-function declaration at top-level not implemented.\n")) continue;
 		}
 	}
-	dyn_arr_pop(&scopes.stack);
+	dyn_arr_pop(&scopes.stack, sizeof(scope*));
 	to->sub = scratch_from(&subscopes, sizeof(scope), up, final);
 }
 

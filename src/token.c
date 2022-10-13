@@ -257,7 +257,7 @@ void token_unexpected(void)
 source_idx find_line(source_idx offset)
 {
 	source_idx *arr   = tokens.line_marks.buf.addr;
-	source_idx L = 0, R = tokens.line_marks.len;
+	source_idx L = 0, R = (source_idx*) tokens.line_marks.end - arr;
 	if (offset >= arr[R-1]) return R-1;
 	source_idx M;
 	while (true) {

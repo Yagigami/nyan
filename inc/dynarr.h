@@ -9,8 +9,8 @@
 
 
 typedef struct dyn_arr {
-	allocation buf; // assumed to represent `void *buf.addr[buf.len/sizeof(T)];`
-	size_t len; // number of T
+	allocation buf; // assumed to represent `void *buf.addr[buf.size/sizeof(T)];`
+	void *end;
 	allocator *a;
 } dyn_arr;
 
@@ -18,7 +18,7 @@ void dyn_arr_init(dyn_arr *v, size_t cap, allocator *a);
 void dyn_arr_fini(dyn_arr *v, allocator *a);
 
 void *dyn_arr_push(dyn_arr *v, void *addr, size_t size, allocator *a);
-void dyn_arr_pop(dyn_arr *v);
+void dyn_arr_pop(dyn_arr *v, size_t size);
 bool dyn_arr_empty(dyn_arr *v);
 
 // if the allocator is known from outside

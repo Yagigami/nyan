@@ -35,18 +35,14 @@ static ssa_ref conv3ac_expr(expr *e, map *refs, dyn_arr *ins, ssa_ref *next, all
 {
 	// ahhh, wouldnt it be nice to just be able to write *p++ = ins{ .op=... }
 	switch (e->kind) {
-		ssa_instr i;
+		ssa_instr buf[3]; // close enough?
 	case EXPR_INT:
 		assert(cat == RVALUE); // the type checking has already been done. this is just a sanity check
-		i.kind = SSA_INT;
-		i.to = *next;
-		dyn_arr_push(ins, &i, sizeof i, a);
+		buf[0] = (ssa_instr){ .kind=SSA_INT, .to=(*next)++ };
+		buf[1] = (ssa_instr){ .v = e->value & ((1LU<<32) - 1) };
+		buf[2] = (ssa_instr){ .v = e->value >> 32 };
 		assert(sizeof (ssa_extension) == sizeof (uint32_t) && "adapt this a bit");
-		i.v = e->value & ((1LU<<32) - 1);
-		dyn_arr_push(ins, &i, sizeof i, a);
-		i.v = e->value >> 32;
-		dyn_arr_push(ins, &i, sizeof i, a);
-		return (*next)++;
+		return buf[0].to;
 	case EXPR_NAME:
 		{
 		map_entry *entry = map_find(refs, e->name, string_hash(e->name), _string_cmp2);
@@ -55,18 +51,18 @@ static ssa_ref conv3ac_expr(expr *e, map *refs, dyn_arr *ins, ssa_ref *next, all
 		return ref3ac2ssa(entry->v);
 		}
 	case EXPR_BINARY:
-		i.kind = tok2ssa[e->binary.op];
-		i.L = conv3ac_expr(e->binary.L, refs, ins, next, a, RVALUE);
-		i.R = conv3ac_expr(e->binary.R, refs, ins, next, a, RVALUE);
-		i.to = (*next)++;
-		dyn_arr_push(ins, &i, sizeof i, a);
-		return i.to;
+		buf[0].kind = tok2ssa[e->binary.op];
+		buf[0].L = conv3ac_expr(e->binary.L, refs, ins, next, a, RVALUE);
+		buf[0].R = conv3ac_expr(e->binary.R, refs, ins, next, a, RVALUE);
+		buf[0].to = (*next)++;
+		dyn_arr_push(ins, &buf[0], sizeof buf[0], a);
+		return buf[0].to;
 	case EXPR_CALL:
-		i.kind = SSA_CALL;
-		i.L = conv3ac_expr(e->call.operand, refs, ins, next, a, RVALUE);
-		i.to = (*next)++;
-		dyn_arr_push(ins, &i, sizeof i, a);
-		return i.to;
+		buf[0].kind = SSA_CALL;
+		buf[0].L = conv3ac_expr(e->call.operand, refs, ins, next, a, RVALUE);
+		buf[0].to = (*next)++;
+		dyn_arr_push(ins, &buf[0], sizeof buf[0], a);
+		return buf[0].to;
 	default:
 		assert(0);
 	}
@@ -174,7 +170,7 @@ static ins_buf pass_2ac(ins_buf src, allocator *a)
 	dyn_arr_init(&dst, 0*sizeof(ssa_instr), a);
 	for (ssa_instr *it = scratch_start(src), *end = scratch_end(src);
 			it != end; it++) switch (it->kind) {
-		ssa_instr i;
+		ssa_instr buf[2];
 		case SSA_INT:
 			dyn_arr_push(&dst, it, sizeof *it, a), it++;
 			/* fallthrough */
@@ -192,14 +188,9 @@ static ins_buf pass_2ac(ins_buf src, allocator *a)
 		case SSA_ADD:
 		case SSA_SUB:
 			// a = add b, c => a = b; a = add a c
-			i.kind = SSA_COPY;
-			i.to = it->to;
-			i.L = it->L;
-			dyn_arr_push(&dst, &i, sizeof i, a);
-			i.kind = it->kind;
-			i.L = i.to;
-			i.R = it->R;
-			dyn_arr_push(&dst, &i, sizeof i, a);
+			buf[0] = (ssa_instr){ .kind=SSA_COPY, .to=it->to, .L=it->L };
+			buf[1] = (ssa_instr){ .kind=it->kind, .to=it->to, .L=it->to, .R = it->R };
+			dyn_arr_push(&dst, buf, 2*sizeof *buf, a);
 			break;
 		default:
 			assert(0);

@@ -120,6 +120,9 @@ allocation allocator_arena_realloc(allocator *a_, allocation m, size_t size, siz
 	// 		- a recursive function calls realloc
 	// 		- a function returns a buffer
 	// 	===> solution taken for now: null and 0xdeadbeef give different behavior
+
+	// and now this code is unused, premature optimization is the root of evil
+	// ...just wanted to try this idea, but it doesn't work with recursion
 	intptr_t icur = (intptr_t)a->cur_low;
 	if ((icur & mask) != 0) goto slow;
 	if (!m.addr && a->low_lim+size <= a->cur_high) {
