@@ -99,9 +99,9 @@ static int fprint_spaces(FILE *to, int num)
 
 static int fprint_3acsym(FILE *to, ssa_sym sym)
 {
-	int prn = fprintf(to, "GLOBAL.%x : %.*s\n", sym.idx, (int) ident_len(sym.name), ident_str(sym.name));
-	int indent = 4;
-	for (ssa_instr *it = sym.ins.buf.addr, *end = it + sym.ins.len;
+	int prn = fprintf(to, "GLOBAL.%x: %.*s\n", sym.idx, (int) ident_len(sym.name), ident_str(sym.name));
+	int indent = 2;
+	for (ssa_instr *it = scratch_start(sym.ins), *end = scratch_end(sym.ins);
 			it != end; it++) {
 		prn += fprint_spaces(to, indent);
 		int extra = 0;

@@ -8,15 +8,8 @@
 #include "token.h"
 #include "ssa.h"
 #include "alloc.h"
+#include "ast.h"
 
-
-extern struct print_state
-{
-	allocation buf;
-} prints;
-
-void print_init(allocation buf);
-void print_fini(void);
 
 #if false // works as if defined like this // 8 variable arguments at max
 int print(FILE *to, ...);
@@ -27,7 +20,7 @@ bool expect_or(bool condition, ...);
 #define print(to,...) _print_impl((to), \
 		((MSK(__VA_ARGS__))<<ARGS_SHIFT)|NUM_ARGS(_, ## __VA_ARGS__), \
 		## __VA_ARGS__)
-#define expect_or(cond, ...) ((cond) ? true: (print(stderr, ## __VA_ARGS__), ast.errors++, false)) // STUPID PRECEDENCE RULES LOL
+#define expect_or(cond, ...) ((cond) ? true: (print(stderr, ## __VA_ARGS__), ast_one_more_error(), false)) // STUPID PRECEDENCE RULES LOL
 
 typedef enum printable {
 	P_STRING,

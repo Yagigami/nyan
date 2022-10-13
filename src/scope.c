@@ -3,7 +3,11 @@
 #include "print.h"
 
 
-struct scope_state_t scopes;
+static struct scope_state_t {
+	dyn_arr stack; // scope* array // push once, update later
+	// for now, can only ever have 1 thing in there: the global scope
+	// it is ok to keep for later when modules are added, regardless
+} scopes;
 
 int resolve_init(size_t initial_nested_scopes, allocator *up)
 {
@@ -54,7 +58,6 @@ static void resolve_expr(expr *e, map *refs, allocator *up)
 		resolve_expr(e->binary.R, refs, up);
 		break;
 	case EXPR_NONE:
-		assert(ast.errors);
 		break;
 	default:
 		assert(0);
@@ -103,7 +106,6 @@ static void resolve_func(decl *f, scope *to, allocator *up)
 			resolve_expr(s->e, &to->refs, up);
 			break;
 		case STMT_NONE:
-			assert(ast.errors);
 			break;
 		default:
 			assert(0);

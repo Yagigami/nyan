@@ -11,7 +11,11 @@
 #include <stdbool.h>
 
 
-struct ssa_context ssa;
+
+static struct ssa_context
+{
+	map refs; // per function // ident -> idx_t to identify a reference | ssa_ref
+} ssa;
 
 static const ssa_kind tok2ssa[TOKEN_NUM] = {
 	['+'] = SSA_ADD, ['-'] = SSA_SUB,
@@ -120,7 +124,8 @@ static void conv3ac_func(decl *d, ssa_sym *to, scope *sc, allocator *a)
 {
 	to->name = d->name;
 	map_clear(&ssa.refs);
-	dyn_arr_init(&to->ins, 0*sizeof(ssa_instr), a);
+	dyn_arr ins;
+	dyn_arr_init(&ins, 0*sizeof(ssa_instr), a);
 	ssa_ref next = 0;
 
 	// transfer from sc to refs
@@ -134,14 +139,15 @@ static void conv3ac_func(decl *d, ssa_sym *to, scope *sc, allocator *a)
 		insert->v = idx_ref(idx, next);
 
 		ssa_instr i = { .kind=SSA_GLOBAL_REF, .to=next++ };
-		dyn_arr_push(&to->ins, &i  , sizeof i, a);
-		dyn_arr_push(&to->ins, &idx, sizeof i, a);
+		dyn_arr_push(&ins, &i  , sizeof i, a);
+		dyn_arr_push(&ins, &idx, sizeof i, a);
 	}
 
 	for (stmt **it = scratch_start(d->func_d.body), **end = scratch_end(d->func_d.body);
 			it != end; it++) {
-		conv3ac_stmt(*it, &ssa.refs, &to->ins, &next, a);
+		conv3ac_stmt(*it, &ssa.refs, &ins, &next, a);
 	}
+	to->ins = scratch_from(&ins, sizeof(ssa_instr), a, a);
 }
 
 ssa_module convert_to_3ac(module_t module, scope *sc, allocator *a)
@@ -160,6 +166,55 @@ ssa_module convert_to_3ac(module_t module, scope *sc, allocator *a)
 	}
 	map_fini(&ssa.refs, a);
 	return scratch_from(&defs, sizeof(ssa_sym), a, a);
+}
+
+static ins_buf pass_2ac(ins_buf src, allocator *a)
+{
+	dyn_arr dst;
+	dyn_arr_init(&dst, 0*sizeof(ssa_instr), a);
+	for (ssa_instr *it = scratch_start(src), *end = scratch_end(src);
+			it != end; it++) switch (it->kind) {
+		ssa_instr i;
+		case SSA_INT:
+			dyn_arr_push(&dst, it, sizeof *it, a), it++;
+			/* fallthrough */
+		case SSA_GLOBAL_REF:
+			assert(it != end);
+			dyn_arr_push(&dst, it, sizeof *it, a), it++;
+			/* fallthrough */
+		case SSA_CALL:
+		case SSA_COPY:
+		case SSA_RET:
+			// nop
+			assert(it != end);
+			dyn_arr_push(&dst, it, sizeof *it, a);
+			break;
+		case SSA_ADD:
+		case SSA_SUB:
+			// a = add b, c => a = b; a = add a c
+			i.kind = SSA_COPY;
+			i.to = it->to;
+			i.L = it->L;
+			dyn_arr_push(&dst, &i, sizeof i, a);
+			i.kind = it->kind;
+			i.L = i.to;
+			i.R = it->R;
+			dyn_arr_push(&dst, &i, sizeof i, a);
+			break;
+		default:
+			assert(0);
+	}
+	return scratch_from(&dst, sizeof(ssa_instr), a, a);
+}
+
+void ssa_run_pass(ssa_module mod, ssa_pass pass, allocator *a)
+{
+	for (ssa_sym *sym = scratch_start(mod), *end = scratch_end(mod);
+			sym != end; sym++) {
+		ins_buf next = pass(sym->ins, a);
+		scratch_fini(sym->ins, a);
+		sym->ins = next;
+	}
 }
 
 void test_3ac(void)
@@ -187,11 +242,12 @@ void test_3ac(void)
 
 	if (!ast.errors) {
 		ssa_module ssa_3ac = convert_to_3ac(module, &global, gpa);
+		ssa_run_pass(ssa_3ac, pass_2ac, gpa);
 		dump_3ac(ssa_3ac);
 
 		for (ssa_sym *sym = scratch_start(ssa_3ac), *end = scratch_end(ssa_3ac);
 				sym != end; sym++)
-			dyn_arr_fini(&sym->ins, gpa);
+			scratch_fini(sym->ins, gpa);
 		scratch_fini(ssa_3ac, gpa);
 	}
 

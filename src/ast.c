@@ -8,7 +8,13 @@
 #include <string.h>
 
 
+
 struct ast_state_t ast;
+
+void ast_one_more_error(void)
+{
+	ast.errors++;
+}
 
 int ast_init(allocator *up)
 {
