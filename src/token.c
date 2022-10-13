@@ -70,7 +70,6 @@ int token_init(const char *path, allocator *up, allocator *names)
 
 void token_fini(void)
 {
-	map_fini(&tokens.idents, tokens.up);
 	dyn_arr_fini(&tokens.line_marks, tokens.up);
 	// names persist
 	int e = unmap_file_sentinel(tokens.base, tokens.len);
@@ -179,6 +178,7 @@ void test_token(void)
 		token_advance();
 	} while (!token_done());
 	token_fini();
+	map_fini(&tokens.idents, gpa);
 	allocator_geom_fini(&names);
 }
 
@@ -206,9 +206,10 @@ ident_t intern_string(source_idx start, size_t len)
 	map_entry *r = map_id(&tokens.idents, k, string_hash, _string_cmp, &inserted, tokens.up);
 	assert(r);
 	if (inserted) {
-		allocation m = ALLOC(tokens.names, len, 1);
+		allocation m = ALLOC(tokens.names, len+1, 1);
 		memcpy(m.addr, token_source(start), len);
-		r->k = k;
+		memcpy(m.addr + len, &(char){ '\0' }, 1); // need the NUL for that dirty ident_len function anyways
+		r->k = (key_t) m.addr; // guess I should have spent the time adding attributes to all functions
 		r->v = len;
 	}
 	return r->k;

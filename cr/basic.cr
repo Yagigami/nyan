@@ -6,6 +6,11 @@ cap func(): int32
 	return y;
 }
 
+main func(): int32
+{
+	return 0;
+}
+
 entry func(): int32
 {
 	first :int32 = 3;

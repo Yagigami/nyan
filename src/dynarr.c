@@ -27,12 +27,12 @@ static void dyn_arr_resize_if_needed(dyn_arr *v, size_t size_after, allocator *a
 	v->end = v->buf.addr + end_offset;
 }
 
-void *dyn_arr_push(dyn_arr *v, void *addr, size_t size, allocator *a)
+void *dyn_arr_push(dyn_arr *v, const void *addr, size_t size, allocator *a)
 {
 	dyn_arr_resize_if_needed(v, v->end - v->buf.addr + size, a);
 	void *to = v->end;
 	v->end += size;
-	if (addr) memcpy(to, addr, size);
+	if (addr && size) memcpy(to, addr, size);
 	return to;
 }
 
@@ -68,3 +68,4 @@ void scratch_fini(scratch_arr s, allocator *a)
 
 void *scratch_start(scratch_arr s) { return s? s->start: NULL; }
 void *scratch_end  (scratch_arr s) { return s? s->end  : NULL; }
+size_t scratch_len(scratch_arr s) { return scratch_end(s) - scratch_start(s); }

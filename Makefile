@@ -36,7 +36,7 @@ test: $(OUT)/$(TEST)
 
 dump: $(OUT)/$(TEST)
 	$<
-	objdump -Dwb binary -m i386 -M x86-64 --insn-width=12 $@
+	objdump -Dwr --insn-width=12 basic.o
 
 $(OUT)/$(TEST): $(OUT)/$(TEST).o $(OBJ)
 	@echo LD $<

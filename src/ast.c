@@ -289,6 +289,7 @@ void test_ast(void)
 	map_fini(&global.refs, ast.temps);
 
 	token_fini();
+	map_fini(&tokens.idents, gpa);
 	allocator_geom_fini(&perma);
 	ast_fini(gpa);
 	if (!ast.errors) printf("  no news is good news.\n");

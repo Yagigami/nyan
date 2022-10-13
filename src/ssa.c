@@ -8,14 +8,10 @@
 #include "print.h"
 // TODO: remove
 #include "gen/x86-64.h"
+#include "gen/elf64.h"
 
 #include <assert.h>
 #include <stdbool.h>
-// TODO: remove
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <unistd.h>
 
 
 
@@ -246,24 +242,25 @@ void test_3ac(void)
 	resolve_refs(module, &global, ast.temps, &perma.base);
 	resolve_fini(gpa);
 	type_check(module, &global);
+	token_fini();
 
 	if (!ast.errors) {
 		ssa_module ssa_3ac = convert_to_3ac(module, &global, gpa);
+		// in reality, all the AST objects can be freed here
+		// only tokens.idents and perma need to keep existing until the object file is made
 		ssa_run_pass(ssa_3ac, pass_2ac, gpa);
 		dump_3ac(ssa_3ac);
 
 		gen_module g = gen_x86_64(ssa_3ac, gpa);
-		int fd = open("dump", O_WRONLY|O_CREAT, S_IRUSR|S_IWUSR);
-		if (fd == -1) perror("open");
-		for (gen_sym *sym = scratch_start(g), *end = scratch_end(g);
+		int e = elf_object_from(&g, "basic.o", gpa);
+		assert(!e);
+
+		for (gen_sym *sym = scratch_start(g.syms), *end = scratch_end(g.syms);
 				sym != end; sym++) {
-			ssize_t r = write(fd, scratch_start(sym->ins), scratch_end(sym->ins) - scratch_start(sym->ins));
-			if (r < 0) perror("write");
-			scratch_fini(sym->refs, gpa);
 			scratch_fini(sym->ins, gpa);
 		}
-		close(fd);
-		scratch_fini(g, gpa);
+		scratch_fini(g.refs, gpa);
+		scratch_fini(g.syms, gpa);
 
 		for (ssa_sym *sym = scratch_start(ssa_3ac), *end = scratch_end(ssa_3ac);
 				sym != end; sym++)
@@ -276,7 +273,7 @@ void test_3ac(void)
 		map_fini(&it->refs, ast.temps);
 	map_fini(&global.refs, ast.temps);
 	allocator_geom_fini(&just_ast);
-	token_fini();
+	map_fini(&tokens.idents, tokens.up);
 	ast_fini(gpa);
 
 	allocator_geom_fini(&perma);

@@ -17,7 +17,7 @@ typedef struct dyn_arr {
 void dyn_arr_init(dyn_arr *v, size_t cap, allocator *a);
 void dyn_arr_fini(dyn_arr *v, allocator *a);
 
-void *dyn_arr_push(dyn_arr *v, void *addr, size_t size, allocator *a);
+void *dyn_arr_push(dyn_arr *v, const void *addr, size_t size, allocator *a);
 void dyn_arr_pop(dyn_arr *v, size_t size);
 bool dyn_arr_empty(dyn_arr *v);
 
@@ -33,6 +33,7 @@ scratch_arr scratch_from(dyn_arr *v, size_t size, allocator *from, allocator *to
 void scratch_fini(scratch_arr s, allocator *a);
 void *scratch_start(scratch_arr s);
 void *scratch_end  (scratch_arr s);
+size_t scratch_len(scratch_arr s);
 
 #endif /* CROUTE_DYNARR_H */
 
