@@ -16,12 +16,13 @@ typedef struct gen_sym {
 	ident_t name;
 	idx_t idx;
 	scratch_arr ins; // bytes
+	scratch_arr refs; // array of idx_pair lo=offset in symbol, hi=referenced index
 } gen_sym;
 
 typedef struct gen_module {
 	scratch_arr syms;
-	scratch_arr refs; // array of idx_pair lo=offset in symbol, hi=referenced index
 	idx_t code_size;
+	idx_t num_refs;
 } gen_module;
 
 gen_module gen_x86_64(ssa_module m2ac, allocator *a);

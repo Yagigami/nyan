@@ -29,7 +29,7 @@ typedef struct _scratch_arr {
 	uint8_t start[];
 } *scratch_arr;
 
-scratch_arr scratch_from(dyn_arr *v, size_t size, allocator *from, allocator *to);
+scratch_arr scratch_from(dyn_arr *v, allocator *from, allocator *to);
 void scratch_fini(scratch_arr s, allocator *a);
 void *scratch_start(scratch_arr s);
 void *scratch_end  (scratch_arr s);

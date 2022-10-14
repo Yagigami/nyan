@@ -97,17 +97,20 @@ static byte *mov64(byte *p, enum x86_64_reg L, enum x86_64_reg R)
 
 static byte *endbr64(byte *p) { return imm32(p, 0xfa1e0ff3); }
 
-static idx_t gen_symbol(gen_sym *dst, ssa_sym *src, dyn_arr *refs, allocator *a)
+static idx_t gen_symbol(gen_sym *dst, ssa_sym *src, allocator *a)
 {
 	dst->name = src->name;
 	dst->idx  = src->idx ;
-	dyn_arr ins;
+	dyn_arr ins, refs;
 	dyn_arr_init(&ins, 0, a);
-	allocation temp_alloc = ALLOC(a, src->num * sizeof(idx_pair), 8);
+	dyn_arr_init(&refs, 0, a);
+	allocation temp_alloc = ALLOC(a, src->num * sizeof(idx_t), 8);
 	idx_t *locals = temp_alloc.addr;
 	ssa_ref next = 0;
 	idx_t local_offset = 0;
 	idx_t offset = 0;
+	idx_t stack_space = src->num * 8;
+	if ((stack_space - 8) & 0xF) stack_space = ((stack_space - 8 + 0xF) & ~0xF) + 8;
 	for (ssa_instr *i = scratch_start(src->ins), *end = scratch_end(src->ins);
 			i != end; i++) {
 		if (i->to >= next && i->kind != SSA_GLOBAL_REF) {
@@ -139,7 +142,7 @@ static idx_t gen_symbol(gen_sym *dst, ssa_sym *src, dyn_arr *refs, allocator *a)
 				{
 				*p++ = 0xe8;
 				idx_pair r = { .lo=offset+1, .hi=locals[i->L] };
-				dyn_arr_push(refs, &r, sizeof r, a);
+				dyn_arr_push(&refs, &r, sizeof r, a);
 				p = imm32(p, 0);
 				p = store64(p, RAX, locals[i->to]);
 				}
@@ -157,12 +160,12 @@ static idx_t gen_symbol(gen_sym *dst, ssa_sym *src, dyn_arr *refs, allocator *a)
 				break;
 			case SSA_PROLOGUE:
 				p = endbr64(p);
-				p = addsub64imm(p, RSP, 0, SSA_SUB);
 				p = push64(p, RBP);
+				p = addsub64imm(p, RSP, stack_space, SSA_SUB);
 				p = mov64(p, RBP, RSP);
 				break;
 			case SSA_EPILOGUE:
-				p = addsub64imm(p, RSP, 0, SSA_ADD);
+				p = addsub64imm(p, RSP, stack_space, SSA_ADD);
 				p = pop64(p, RBP);
 				break;
 			default:
@@ -173,7 +176,8 @@ static idx_t gen_symbol(gen_sym *dst, ssa_sym *src, dyn_arr *refs, allocator *a)
 	}
 	
 	DEALLOC(a, temp_alloc);
-	dst->ins = scratch_from(&ins, 1, a, a);
+	dst->ins = scratch_from(&ins, a, a);
+	dst->refs = scratch_from(&refs, a, a);
 	return scratch_len(dst->ins);
 }
 
@@ -181,16 +185,17 @@ gen_module gen_x86_64(ssa_module m2ac, allocator *a)
 {
 	gen_module out;
 	out.code_size = 0;
+	out.num_refs = 0;
 	dyn_arr dest, refs;
 	dyn_arr_init(&dest, 0*sizeof(gen_sym), a);
 	dyn_arr_init(&refs, 0*sizeof(idx_pair), a);
 	for (ssa_sym *prev = scratch_start(m2ac), *end = scratch_end(m2ac);
 			prev != end; prev++) {
 		gen_sym *next = dyn_arr_push(&dest, NULL, sizeof *next, a);
-		out.code_size += gen_symbol(next, prev, &refs, a);
+		out.code_size += gen_symbol(next, prev, a);
+		out.num_refs  += scratch_len(next->refs) / sizeof(idx_pair);
 	}
-	out.syms = scratch_from(&dest, sizeof(gen_sym), a, a);
-	out.refs = scratch_from(&refs, sizeof(idx_pair), a, a);
+	out.syms = scratch_from(&dest, a, a);
 	return out;
 }
 

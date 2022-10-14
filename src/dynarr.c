@@ -47,7 +47,7 @@ bool dyn_arr_empty(dyn_arr *v)
 	return v->end == v->buf.addr;
 }
 
-scratch_arr scratch_from(dyn_arr *v, size_t size, allocator *from, allocator *to)
+scratch_arr scratch_from(dyn_arr *v, allocator *from, allocator *to)
 {
 	size_t fam_size = v->end - v->buf.addr;
 	if (fam_size == 0) return NULL;

@@ -57,6 +57,7 @@ int elf_object_from(gen_module *mod, const char *path, allocator *a)
 	ehdr->e_shstrndx = SECTION_SHSTRTAB;
 
 	Elf64_Shdr *shdr = dyn_arr_push(&out, NULL, ehdr->e_shnum * sizeof *shdr, a);
+	// this constant updating on realloc is very annoying
 	ehdr = out.buf.addr;
 	memset(&shdr[0], 0, sizeof *shdr);
 	
@@ -89,7 +90,7 @@ int elf_object_from(gen_module *mod, const char *path, allocator *a)
 	shdr[SECTION_RELA_TEXT].sh_flags = 0;
 	shdr[SECTION_RELA_TEXT].sh_addr = 0;
 	shdr[SECTION_RELA_TEXT].sh_offset = align(shdr[SECTION_TEXT].sh_offset + shdr[SECTION_TEXT].sh_size, 8);
-	shdr[SECTION_RELA_TEXT].sh_size = scratch_len(mod->refs) / sizeof(idx_pair) * sizeof(Elf64_Rela);
+	shdr[SECTION_RELA_TEXT].sh_size = mod->num_refs * sizeof(Elf64_Rela);
 	shdr[SECTION_RELA_TEXT].sh_link = SECTION_SYMTAB;
 	shdr[SECTION_RELA_TEXT].sh_info = SECTION_TEXT; // the target of relocations
 	shdr[SECTION_RELA_TEXT].sh_addralign = 8;
@@ -125,11 +126,13 @@ int elf_object_from(gen_module *mod, const char *path, allocator *a)
 	size_t strtab_offset = 1; // sentinel at 0
 	dyn_arr_push(&out, &(char){ '\0' }, 1, a);
 	size_t text_offset = 0;
+	size_t r_idx = 0;
 	for (gen_sym *start = scratch_start(mod->syms), *end = scratch_end(mod->syms), *it = start;
 			it != end; it++) {
 		size_t idx = it - start;
 		ehdr = out.buf.addr;
 		shdr = out.buf.addr + ehdr->e_shoff;
+
 		Elf64_Sym *sym = out.buf.addr + shdr[SECTION_SYMTAB].sh_offset + (1+idx) * sizeof *sym;
 		sym->st_name = strtab_offset;
 		strtab_offset += ident_len(it->name) + 1;
@@ -138,22 +141,20 @@ int elf_object_from(gen_module *mod, const char *path, allocator *a)
 		sym->st_shndx = SECTION_TEXT;
 		sym->st_value = text_offset;
 		memcpy(out.buf.addr + shdr[SECTION_TEXT].sh_offset + text_offset, scratch_start(it->ins), scratch_len(it->ins));
-		text_offset += scratch_len(it->ins);
 		sym->st_size = 0;
+		for (idx_pair *pair_start = scratch_start(it->refs), *pair_end = scratch_end(it->refs), *pair = pair_start;
+				pair != pair_end; pair++) {
+			Elf64_Rela *reloc = out.buf.addr + shdr[SECTION_RELA_TEXT].sh_offset + r_idx * sizeof *reloc;
+			reloc->r_offset = pair->lo + text_offset;
+			size_t genref2elfsym = 1 + pair->hi;
+			reloc->r_info = ELF64_R_INFO(genref2elfsym, R_X86_64_PC32);
+			reloc->r_addend = -4; // e8 @00 00 00 00 $ // you write at @ but the cpu executes the call at $ hence -4
+			r_idx++;
+		}
+		text_offset += scratch_len(it->ins);
+
 		dyn_arr_push(&out, ident_str(it->name), ident_len(it->name), a);
 		dyn_arr_push(&out, &(char){ '\0' }, 1, a); // NUL terminator
-	}
-
-	ehdr = out.buf.addr;
-	shdr = out.buf.addr + ehdr->e_shoff;
-	for (idx_pair *pair_start = scratch_start(mod->refs), *pair_end = scratch_end(mod->refs), *pair = pair_start;
-			pair != pair_end; pair++) {
-		size_t r_idx = pair - pair_start;
-		Elf64_Rela *reloc = out.buf.addr + shdr[SECTION_RELA_TEXT].sh_offset + r_idx * sizeof *reloc;
-		reloc->r_offset = pair->lo + text_offset;
-		size_t genref2elfsym = 1 + pair->hi;
-		reloc->r_info = ELF64_R_INFO(genref2elfsym, R_X86_64_PC32);
-		reloc->r_addend = -4; // e8 @00 00 00 00 $ // you write at @ but the cpu executes the call at $ hence -4
 	}
 	shdr[SECTION_STRTAB].sh_size = strtab_offset;
 
@@ -165,9 +166,9 @@ int elf_object_from(gen_module *mod, const char *path, allocator *a)
 		}
 		written += w;
 	}
-	dyn_arr_fini(&out, a);
 	status = 0;
 fail_write:
+	dyn_arr_fini(&out, a);
 	close(fd);
 fail_open:
 	return status;

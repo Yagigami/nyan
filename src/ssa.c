@@ -152,7 +152,7 @@ static void conv3ac_func(decl *d, ssa_sym *to, scope *sc, allocator *a)
 			it != end; it++) {
 		conv3ac_stmt(*it, &ssa.refs, &ins, &next, a);
 	}
-	to->ins = scratch_from(&ins, sizeof(ssa_instr), a, a);
+	to->ins = scratch_from(&ins, a, a);
 	to->num = next;
 }
 
@@ -171,7 +171,7 @@ ssa_module convert_to_3ac(module_t module, scope *sc, allocator *a)
 		conv3ac_func(d, sym, scope_it, a);
 	}
 	map_fini(&ssa.refs, a);
-	return scratch_from(&defs, sizeof(ssa_sym), a, a);
+	return scratch_from(&defs, a, a);
 }
 
 static ins_buf pass_2ac(ins_buf src, allocator *a)
@@ -207,7 +207,7 @@ static ins_buf pass_2ac(ins_buf src, allocator *a)
 		default:
 			assert(0);
 	}
-	return scratch_from(&dst, sizeof(ssa_instr), a, a);
+	return scratch_from(&dst, a, a);
 }
 
 void ssa_run_pass(ssa_module mod, ssa_pass pass, allocator *a)
@@ -258,8 +258,8 @@ void test_3ac(void)
 		for (gen_sym *sym = scratch_start(g.syms), *end = scratch_end(g.syms);
 				sym != end; sym++) {
 			scratch_fini(sym->ins, gpa);
+			scratch_fini(sym->refs, gpa);
 		}
-		scratch_fini(g.refs, gpa);
 		scratch_fini(g.syms, gpa);
 
 		for (ssa_sym *sym = scratch_start(ssa_3ac), *end = scratch_end(ssa_3ac);

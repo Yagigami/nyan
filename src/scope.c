@@ -138,7 +138,7 @@ void resolve_refs(module_t of, scope *to, allocator *up, allocator *final)
 		}
 	}
 	dyn_arr_pop(&scopes.stack, sizeof(scope*));
-	to->sub = scratch_from(&subscopes, sizeof(scope), up, final);
+	to->sub = scratch_from(&subscopes, up, final);
 }
 
 decl *ref2decl(val_t v)

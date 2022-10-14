@@ -101,7 +101,7 @@ expr *parse_expr_call(allocator *up)
 		}
 		call->kind = EXPR_CALL;
 		call->call.operand = operand;
-		call->call.args = scratch_from(&args, sizeof(expr*), ast.temps, up);
+		call->call.args = scratch_from(&args, ast.temps, up);
 		operand = call;
 	}
 	return operand;
@@ -176,7 +176,7 @@ type_t *parse_type(allocator *up)
 		dyn_arr params;
 		dyn_arr_init(&params, 0*sizeof(func_arg), ast.temps);
 		parse_type_params(&params, up);
-		t->func_t.params = scratch_from(&params, sizeof(func_arg), ast.temps, up);
+		t->func_t.params = scratch_from(&params, ast.temps, up);
 		if (!token_expect(':')) {
 			dyn_arr_fini(&params, ast.temps);
 			goto err;
@@ -226,7 +226,7 @@ stmt_block parse_stmt_block(allocator *up)
 		stmt *s = parse_stmt(up);
 		dyn_arr_push(&body, &s, sizeof (stmt*), ast.temps);
 	}
-	return scratch_from(&body, sizeof(stmt*), ast.temps, up);
+	return scratch_from(&body, ast.temps, up);
 }
 
 decl_idx parse_decl(allocator *up)
@@ -263,7 +263,7 @@ module_t parse_module(allocator *up)
 		decl_idx d = parse_decl(up);
 		dyn_arr_push(&m, &d, sizeof d, ast.temps);
 	} while (!token_done());
-	return scratch_from(&m, sizeof(decl_idx), ast.temps, up);
+	return scratch_from(&m, ast.temps, up);
 }
 
 void test_ast(void)
