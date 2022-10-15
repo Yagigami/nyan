@@ -42,9 +42,14 @@ void dyn_arr_pop(dyn_arr *v, size_t size)
 	v->end -= size;
 }
 
-bool dyn_arr_empty(dyn_arr *v)
+bool dyn_arr_empty(const dyn_arr *v)
 {
 	return v->end == v->buf.addr;
+}
+
+size_t dyn_arr_size(const dyn_arr *v)
+{
+	return v->end - v->buf.addr;
 }
 
 scratch_arr scratch_from(dyn_arr *v, allocator *from, allocator *to)

@@ -27,8 +27,25 @@ enum ssa_opcode
 	SSA_RET,
 	SSA_PROLOGUE,
 	SSA_EPILOGUE,
+	SSA_BOOL, // the value is embedded in the L field
+	SSA_CMPEQ,
+	SSA_CMPNEQ,
+	SSA_CMPLT,
+	SSA_CMPLEQ,
+	SSA_CMPGT,
+	SSA_CMPGEQ,
+	SSA_BOOL_NEG,
 
 	SSA_NUM
+};
+
+enum ssa_type
+{
+	SSAT_NONE = 0,
+	SSAT_INT32,
+	SSAT_BOOL,
+
+	SSAT_NUM
 };
 
 // 3-address
@@ -43,11 +60,16 @@ typedef struct ssa_sym {
 	ident_t name;
 	idx_t idx;
 	ins_buf ins;
-	ssa_ref num;
+	scratch_arr locals; // maps ssa_refs -> idx_t size | log2 align | type
 } ssa_sym;
 
-typedef scratch_arr ssa_module; // array of ssa_sym
+typedef ssa_extension local_info;
+local_info ssa_linfo(idx_t size, size_t align, enum ssa_type type);
+idx_t ssa_lsize(local_info l);
+size_t ssa_lalign(local_info l);
+enum ssa_type ssa_ltype(local_info l);
 
+typedef scratch_arr ssa_module; // array of ssa_sym
 ssa_module convert_to_3ac(module_t module, scope *sc, allocator *a);
 
 typedef ins_buf (*ssa_pass)(ins_buf src, allocator *a);

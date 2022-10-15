@@ -19,7 +19,8 @@ void dyn_arr_fini(dyn_arr *v, allocator *a);
 
 void *dyn_arr_push(dyn_arr *v, const void *addr, size_t size, allocator *a);
 void dyn_arr_pop(dyn_arr *v, size_t size);
-bool dyn_arr_empty(dyn_arr *v);
+bool dyn_arr_empty(const dyn_arr *v);
+size_t dyn_arr_size(const dyn_arr *v);
 
 // if the allocator is known from outside
 typedef struct _scratch_arr {

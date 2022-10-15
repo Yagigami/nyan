@@ -19,8 +19,26 @@ static_assert(IDENT_MAX_LEN-1 < (1<<IDENT_SHIFT), "increase IDENT_SHIFT");
 struct global_token_state tokens;
 
 // assuming 0-init for the fields not mentioned
-static const token_kind token_precedence[TOKEN_NUM] = {
-	['+'] = '+', ['-'] = '+',
+static const enum {
+	PREC_POSTFIX,
+	PREC_PREFIX,
+	PREC_MULTIPLY,
+	PREC_SHIFT,
+	PREC_BIT_AND,
+	PREC_BIT_OR,
+	PREC_ADD,
+	PREC_CMP,
+	PREC_LOG_AND,
+	PREC_LOG_OR,
+	PREC_CAST,
+} token_precedence[TOKEN_NUM] = {
+	['!'] = PREC_PREFIX,
+
+	['+'] = PREC_ADD, ['-'] = PREC_ADD,
+
+	[TOKEN_EQ] = TOKEN_EQ, [TOKEN_NEQ] = TOKEN_EQ,
+	['<']      = TOKEN_EQ, [TOKEN_LEQ] = TOKEN_EQ,
+	['>']      = TOKEN_EQ, [TOKEN_GEQ] = TOKEN_EQ,
 };
 
 static ident_t intern_string(source_idx start, size_t len);
@@ -53,6 +71,9 @@ int token_init(const char *path, allocator *up, allocator *names)
 		#define KW(name) INSERT(kw_##name, #name)
 		KW(func);
 		KW(int32);
+		KW(bool);
+		KW(false);
+		KW(true);
 		KW(return);
 
 		INSERT(placeholder, "<missing>");
@@ -91,7 +112,19 @@ again:
 	const char *start = at;
 	switch ((next.kind = *at++)) {
 	case '\0': // sentinel
-	case '+': case '-': case '=': // support += later
+	#define CASE2(FIRST, SECOND, FALLBACK) \
+	case FIRST: \
+		    if (*at == SECOND) { \
+			    at++; \
+			    next.kind = FALLBACK; \
+		    } \
+		break
+	CASE2('=', '=', TOKEN_EQ);
+	CASE2('<', '=', TOKEN_LEQ);
+	CASE2('>', '=', TOKEN_GEQ);
+	CASE2('!', '=', TOKEN_NEQ);
+	#undef CASE2
+	case '+': case '-': // support += later
 	case ';': case ':': case '(': case ')': case '{': case '}': // always just 1 token
 		break;
 	case 'A' ... 'Z': case 'a' ... 'z': case '_':
@@ -244,7 +277,7 @@ bool lookahead_is_kw(ident_t kw)
 bool token_match_precedence(token_kind p)
 {
 	assert(0 <= p && p < sizeof token_precedence/sizeof *token_precedence);
-	bool r = token_precedence[tokens.current.kind] == p;
+	bool r = token_precedence[tokens.current.kind] == token_precedence[p]; // or expose the enum
 	if (r) token_advance();
 	return r;
 }

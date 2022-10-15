@@ -58,6 +58,7 @@ static int fprint_source_line(FILE *to, source_idx offset)
 
 static int fprint_3acinstr(FILE *to, ssa_instr *i, int *extra_offset)
 {
+	static const char *cmp2s[SSA_CMPGEQ - SSA_CMPEQ + 1] = { "eq", "neq", "lt", "leq", "gt", "geq", };
 	switch (i->kind) {
 	case SSA_INT:
 		{
@@ -67,27 +68,24 @@ static int fprint_3acinstr(FILE *to, ssa_instr *i, int *extra_offset)
 		*extra_offset = 2;
 		return prn + fprintf(to, "%lx\n", val);
 		}
-	case SSA_ADD:
-		return fprintf(to, "%%%hhx = add %%%hhx ,%%%hhx\n", i->to, i->L, i->R);
-	case SSA_SUB:
-		return fprintf(to, "%%%hhx = sub %%%hhx ,%%%hhx\n", i->to, i->L, i->R);
-	case SSA_CALL:
-		return fprintf(to, "%%%hhx = call %%%hhx\n", i->to, i->L);
 	case SSA_GLOBAL_REF:
 		{
-		int prn = fprintf(to, "%%%hhx = GLOBAL.", i++->to);
-		ssa_extension idx = i->v;
-		*extra_offset = 1;
-		return prn + fprintf(to, "%x\n", idx);
+			int prn = fprintf(to, "%%%hhx = GLOBAL.", i++->to);
+			ssa_extension idx = i->v;
+			*extra_offset = 1;
+			return prn + fprintf(to, "%x\n", idx);
 		}
-	case SSA_COPY:
-		return fprintf(to, "%%%hhx = %%%hhx\n", i->to, i->L);
-	case SSA_RET:
-		return fprintf(to, "ret %%%hhx\n", i->to);
-	case SSA_PROLOGUE:
-		return fprintf(to, "enter\n");
-	case SSA_EPILOGUE:
-		return fprintf(to, "leave\n");
+	case SSA_PROLOGUE: return fprintf(to, "enter\n");
+	case SSA_EPILOGUE: return fprintf(to, "leave\n");
+	case SSA_RET: return fprintf(to, "ret %%%hhx\n", i->to);
+	case SSA_COPY: return fprintf(to, "%%%hhx = %%%hhx\n", i->to, i->L);
+	case SSA_BOOL: return fprintf(to, "%%%hhx = bool(%d)\n", i->to, i->L);
+	case SSA_CALL: return fprintf(to, "%%%hhx = call %%%hhx\n", i->to, i->L);
+	case SSA_BOOL_NEG: return fprintf(to, "%%%hhx = bool_neg %%%hhx\n", i->to, i->L);
+	case SSA_ADD: return fprintf(to, "%%%hhx = add %%%hhx, %%%hhx\n", i->to, i->L, i->R);
+	case SSA_SUB: return fprintf(to, "%%%hhx = sub %%%hhx, %%%hhx\n", i->to, i->L, i->R);
+	case SSA_CMPEQ: case SSA_CMPNEQ: case SSA_CMPLT: case SSA_CMPLEQ: case SSA_CMPGT: case SSA_CMPGEQ:
+		return fprintf(to, "%%%hhx = %s %%%hhx, %%%hhx\n", i->to, cmp2s[i->kind - SSA_CMPEQ], i->L, i->R);
 	default:
 		assert(0);
 	}

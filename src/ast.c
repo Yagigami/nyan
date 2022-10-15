@@ -35,7 +35,7 @@ static decl_idx parse_decl(allocator *up);
 
 static expr *parse_expr(allocator *up);
 static expr *parse_expr_atom(allocator *up);
-static expr *parse_expr_call(allocator *up);
+static expr *parse_expr_postfix(allocator *up);
 static expr *parse_expr_add(allocator *up);
 
 static type_t *parse_type(allocator *up);
@@ -82,13 +82,17 @@ expr *parse_expr_atom(allocator *up)
 	} else if (token_match(TOKEN_INT)) {
 		atom->kind = EXPR_INT;
 		atom->value = snapshot.value;
-	} else
-		expect_or(false, atom->pos, "invalid operand to expression.\n"),
+	} else if (token_match_kw(tokens.kw_false) || token_match_kw(tokens.kw_true)) {
+		atom->kind = EXPR_BOOL;
+		atom->name = snapshot.processed;
+	} else {
+		expect_or(false, atom->pos, "invalid operand to expression.\n");
 		atom->kind = EXPR_NONE;
+	}
 	return atom;
 }
 
-expr *parse_expr_call(allocator *up)
+expr *parse_expr_postfix(allocator *up)
 {
 	expr *operand = parse_expr_atom(up);
 	while (token_match('(')) {
@@ -107,9 +111,22 @@ expr *parse_expr_call(allocator *up)
 	return operand;
 }
 
+expr *parse_expr_prefix(allocator *up)
+{
+	token snapshot = tokens.current;
+	if (token_match_precedence('!')) {
+		expr *pre = ALLOC(up, sizeof *pre, 8).addr;
+		pre->kind = EXPR_UNARY;
+		pre->unary.op = snapshot.kind;
+		pre->unary.operand = parse_expr_prefix(up);
+		pre->pos = snapshot.pos;
+		return pre;
+	} else return parse_expr_postfix(up);
+}
+
 expr *parse_expr_add(allocator *up)
 {
-	expr *L = parse_expr_call(up);
+	expr *L = parse_expr_prefix(up);
 	token snapshot = tokens.current;
 	if (token_match_precedence('+')) {
 		token_kind kind = snapshot.kind;
@@ -126,9 +143,30 @@ expr *parse_expr_add(allocator *up)
 	return L;
 }
 
+expr *parse_expr_cmp(allocator *up)
+{
+	expr *L = parse_expr_add(up);
+	token snapshot = tokens.current;
+	if (token_match_precedence(TOKEN_EQ)) {
+		token_kind kind = snapshot.kind;
+		expr *R = parse_expr_add(up); // no a == b == c
+		expr *cmp = ALLOC(up, sizeof *cmp, 8).addr;
+		cmp->binary.L = L;
+		cmp->binary.R = R;
+		cmp->binary.op = kind;
+		cmp->kind = EXPR_BINARY;
+		cmp->pos = snapshot.pos;
+		if (!expect_or(!token_match_precedence(TOKEN_EQ),
+			snapshot.pos, "Nesting comparisons is not supported. You may use parentheses.\n"))
+			cmp->kind = EXPR_NONE;
+		return cmp;
+	}
+	return L;
+}
+
 expr *parse_expr(allocator *up)
 {
-	return parse_expr_add(up);
+	return parse_expr_cmp(up);
 }
 
 void parse_type_params(dyn_arr *p, allocator *up)
@@ -154,6 +192,9 @@ type_t *parse_type_prim(allocator *up)
 	} else if (token_match_kw(tokens.kw_int32)) {
 		prim->kind = TYPE_PRIMITIVE;
 		prim->name = tokens.kw_int32;
+	} else if (token_match_kw(tokens.kw_bool)) {
+		prim->kind = TYPE_PRIMITIVE;
+		prim->name = tokens.kw_bool;
 	} else {
 		if (!expect_or(false, token_pos(), "unknown type ", tokens.current, "\n"))
 			token_skip_to_newline();

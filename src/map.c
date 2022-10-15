@@ -35,8 +35,6 @@ map_entry *map_rehash_if_needed(map *map, map_entry *watch, map_hash hash, alloc
 	size_t new_size = growth_factor*map->m.size;
 	if (new_size < size_after) new_size = size_after;
 	allocation m = ALLOC(a, new_size, 16);
-	assert(m.addr);
-	if (!m.addr) return NULL;
 	memset(m.addr, 0, m.size);
 	size_t new_cap = m.size/sizeof(map_entry);
 	for (map_entry *e = map->m.addr; e != map->m.addr+map->m.size; e++) {

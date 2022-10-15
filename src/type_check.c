@@ -33,6 +33,11 @@ static type_t *type_check_expr(expr *e, map *refs, value_category c)
 	static type_t type_int32;
 	type_int32.kind = TYPE_PRIMITIVE;
 	type_int32.name = tokens.kw_int32;
+
+	static type_t type_bool;
+	type_bool.kind = TYPE_PRIMITIVE;
+	type_bool.name = tokens.kw_bool;
+
 	type_missing.kind = TYPE_NONE;
 	type_missing.name = tokens.placeholder;
 	switch (e->kind) {
@@ -40,6 +45,10 @@ static type_t *type_check_expr(expr *e, map *refs, value_category c)
 		if (!expect_or(c == RVALUE,
 				e->pos, "cannot assign to an integer.\n")) goto err;
 		return &type_int32;
+	case EXPR_BOOL:
+		if (!expect_or(c == RVALUE,
+				e->pos, "cannot assign to a boolean.\n")) goto err;
+		return &type_bool;
 	case EXPR_NAME:
 		{
 		map_entry *entry = map_find(refs, e->name, string_hash(e->name), _string_cmp2);
@@ -53,11 +62,19 @@ static type_t *type_check_expr(expr *e, map *refs, value_category c)
 		{
 		if (!expect_or(c == RVALUE,
 				e->pos, "cannot assign to the result of binary expression.\n")) goto err;
+		// TODO: change interface to tc_expr_expecting(L, type)
 		type_t *L = type_check_expr(e->binary.L, refs, RVALUE);
 		type_t *R = type_check_expr(e->binary.R, refs, RVALUE);
 		if (!expect_or(same_type(L, R) && same_type(L, &type_int32),
 				e->pos, "operands incompatible with this operation.\n")) goto err;
-		return L;
+		return e->binary.op == '+' || e->binary.op == '-' ? L: &type_bool;
+		}
+	case EXPR_UNARY:
+		{
+		type_t *t = type_check_expr(e->unary.operand, refs, RVALUE);
+		if (!expect_or(same_type(t, &type_bool),
+				e->pos, "cannot find the boolean complement of non-boolean.\n")) goto err;
+		return t;
 		}
 	case EXPR_CALL:
 		{
@@ -75,9 +92,7 @@ static type_t *type_check_expr(expr *e, map *refs, value_category c)
 		assert(0);
 	}
 err:;
-	static type_t type_err;
-	type_err.kind = TYPE_NONE;
-	return &type_err;
+	return &type_missing;
 }
 
 static void type_check_decl(decl_idx i, scope *sc);

@@ -32,6 +32,10 @@ typedef enum token_kind {
 	TOKEN_KEYWORD,
 	TOKEN_INT,
 	TOKEN_CALL,
+	TOKEN_EQ,
+	TOKEN_NEQ,
+	TOKEN_LEQ,
+	TOKEN_GEQ,
 
 	TOKEN_NUM
 } token_kind;
@@ -56,6 +60,9 @@ extern struct global_token_state {
 	dyn_arr line_marks; // array of source_idx
 	ident_t kw_func,
 	        kw_int32,
+		kw_bool,
+		kw_false,
+		kw_true,
 		kw_return;
 	ident_t placeholder;
 	const char *keywords_begin, *keywords_end;

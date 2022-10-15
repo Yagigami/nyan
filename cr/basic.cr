@@ -6,6 +6,15 @@ cap func(): int32
 	return y;
 }
 
+uses_bool func(): bool
+{
+	a : bool = true;
+	b : int = 8 + 0;
+	c : bool = b == cap();
+	d : bool = !(9 < b);
+	return a;
+}
+
 main func(): int32
 {
 	return 0;

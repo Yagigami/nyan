@@ -10,7 +10,7 @@ PRIMITIVES: type : primit target* [ params ]
 	array 		-> T [N]
 	function	-> func funcparams : R
 	// make it so that fptr is appf: func**[13](x:int32,y:int32):int32
-	(boolean)
+	boolean
 	(unit)
 
 funcparams : (a1: T1, a2: T2, ...)
@@ -23,6 +23,7 @@ OPS:
 	in-bit-and	-> x&y
 	in-bit-or	-> x|y, x^y
 	in-add		-> x+y, x-y, x+%y, x-%y
+	in-cmp		-> x==y, x<y, x<=y, x>y, x>=y, x!=y
 	in-log-and	-> x&&y
 	in-log-or	-> x||y
 	in-cast		-> x:T

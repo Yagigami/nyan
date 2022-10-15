@@ -40,9 +40,11 @@ typedef enum stmt_kind {
 typedef enum expr_kind {
 	EXPR_NONE,
 	EXPR_INT,
+	EXPR_BOOL,
 	EXPR_NAME,
 	EXPR_CALL,
 	EXPR_BINARY,
+	EXPR_UNARY,
 } expr_kind;
 
 struct expr;
@@ -79,6 +81,10 @@ typedef struct expr {
 			struct expr *L, *R;
 			token_kind op;
 		} binary;
+		struct {
+			struct expr *operand;
+			token_kind op;
+		} unary;
 	};
 	expr_kind kind;
 	source_idx pos;

@@ -36,6 +36,7 @@ static void resolve_expr(expr *e, map *refs, allocator *up)
 		{
 			size_t h = string_hash(e->name);
 			map_entry *name = map_find(refs, e->name, h, _string_cmp2);
+			if (name) break;
 			for (scope **start = scopes.stack.buf.addr, **it = scopes.stack.end;
 					!name && it > start; it--)
 				name = map_find(&it[-1]->refs, e->name, h, _string_cmp2);
@@ -45,6 +46,7 @@ static void resolve_expr(expr *e, map *refs, allocator *up)
 		}
 		break;
 	case EXPR_INT:
+	case EXPR_BOOL:
 		// nop
 		break;
 	case EXPR_CALL:
@@ -56,6 +58,9 @@ static void resolve_expr(expr *e, map *refs, allocator *up)
 	case EXPR_BINARY:
 		resolve_expr(e->binary.L, refs, up);
 		resolve_expr(e->binary.R, refs, up);
+		break;
+	case EXPR_UNARY:
+		resolve_expr(e->unary.operand, refs, up);
 		break;
 	case EXPR_NONE:
 		break;
@@ -84,7 +89,7 @@ static void resolve_simple_decl(decl_idx i, map *refs, allocator *up)
 
 static void resolve_func(decl *f, scope *to, allocator *up)
 {
-	map_init(&to->refs, 2*sizeof(map_entry), up);
+	map_init(&to->refs, 2, up);
 	// dyn_arr subscopes;
 	// dyn_arr_init(&subscopes, 0, &ast.node_a.base);
 	assert(f->type->func_t.params == NULL);
