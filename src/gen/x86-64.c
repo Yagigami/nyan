@@ -156,13 +156,13 @@ static idx_t gen_symbol(gen_sym *dst, ssa_sym *src, allocator *a)
 	dyn_arr_init(&refs, 0, a);
 	dyn_arr_init(&label_relocs, 0*sizeof(idx_pair), a);
 
-	allocation temp_alloc, ta2 = ALLOC(a, src->labels * sizeof(idx_pair), 4);
+	allocation temp_alloc, ta2 = ALLOC(a, (src->labels+1) * sizeof(idx_t), 4);
 	idx_t *labels = ta2.addr;
 	idx_t stack_space;
 	idx_t *locals = gen_lalloc(src->locals, &stack_space, &temp_alloc, a);
 
-	for (ssa_instr *i = scratch_start(src->ins), *end = scratch_end(src->ins);
-			i != end; i++) {
+	for (ssa_instr *start = scratch_start(src->ins), *end = scratch_end(src->ins),
+			*i = start; i != end; i++) {
 		byte buf[64], *p = buf;
 		switch (i->kind) {
 			case SSA_GOTO:
@@ -181,6 +181,10 @@ static idx_t gen_symbol(gen_sym *dst, ssa_sym *src, allocator *a)
 				assert(i[-1].kind == SSA_CMP);
 				dyn_arr_push(&label_relocs, &(idx_pair){ .lo=dyn_arr_size(&ins) + 2, .hi=i->L }, sizeof(idx_pair), a);
 				p = imm32(p, 0);
+				break;
+			case SSA_COPY:
+				p = load(p, RAX, locals[i->L], 32);
+				p = store(p, RAX, locals[i->to], 32);
 				break;
 			case SSA_LABEL:
 				labels[i->to] = dyn_arr_size(&ins);
@@ -225,11 +229,10 @@ static idx_t gen_symbol(gen_sym *dst, ssa_sym *src, allocator *a)
 				locals[i->to] = i[1].v;
 				i++;
 				break;
-			case SSA_COPY:
-				p = load(p, RAX, locals[i->L], 32);
-				p = store(p, RAX, locals[i->to], 32);
-				break;
 			case SSA_RET:
+				p = load(p, RAX, locals[i->to], 32);
+				p = addsubimm32(p, RSP, stack_space, SSA_ADD, 64);
+				p = pop64(p, RBP);
 				*p++ = 0xc3;
 				break;
 			case SSA_PROLOGUE:
@@ -237,10 +240,6 @@ static idx_t gen_symbol(gen_sym *dst, ssa_sym *src, allocator *a)
 				p = push64(p, RBP);
 				p = addsubimm32(p, RSP, stack_space, SSA_SUB, 64);
 				p = mov(p, RBP, RSP, 64);
-				break;
-			case SSA_EPILOGUE:
-				p = addsubimm32(p, RSP, stack_space, SSA_ADD, 64);
-				p = pop64(p, RBP);
 				break;
 			default:
 				assert(0);

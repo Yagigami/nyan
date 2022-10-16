@@ -75,9 +75,8 @@ static int fprint_3acinstr(FILE *to, ssa_instr *i, int *extra_offset)
 		*extra_offset = 1;
 		return fprintf(to, "%%%hhx = phi [%%%hhx: L%hhx] [%%%hhx: L%hhx]\n", i[0].to, i[0].L, i[1].L, i[0].R, i[1].R);
 	case SSA_PROLOGUE: return fprintf(to, "enter\n");
-	case SSA_EPILOGUE: return fprintf(to, "leave\n");
 	case SSA_RET: return fprintf(to, "ret %%%hhx\n", i->to);
-	case SSA_COPY: return fprintf(to, "%%%hhx = %%%hhx (%d)\n", i->to, i->L, i->R);
+	case SSA_COPY: return fprintf(to, "%%%hhx = %%%hhx\n", i->to, i->L);
 	case SSA_BOOL: return fprintf(to, "%%%hhx = bool(%d)\n", i->to, i->L);
 	case SSA_CALL: return fprintf(to, "%%%hhx = call %%%hhx\n", i->to, i->L);
 	case SSA_BOOL_NEG: return fprintf(to, "%%%hhx = bool_neg %%%hhx\n", i->to, i->L);
@@ -89,7 +88,7 @@ static int fprint_3acinstr(FILE *to, ssa_instr *i, int *extra_offset)
 	case SSA_BEQ: case SSA_BNEQ: case SSA_BLT: case SSA_BLEQ: case SSA_BGT: case SSA_BGEQ:
 		return fprintf(to, "%s %%%hhx, L%hhx, L%hhx\n", opc2s[i->kind - SSA_BEQ], i->to, i->L, i->R);
 	default:
-		assert(0);
+		return fprintf(to, "unknown<%hhx %hhx %hhx %hhx>\n", i->kind, i->to, i->L, i->R);
 	}
 }
 

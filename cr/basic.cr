@@ -33,6 +33,19 @@ uses_bool func(): int32
 	return b;
 }
 
+cannot_alias_phi func() : int32
+{
+	b : int32 = 1;
+	a : int32 = 2;
+	if (1 != 2) {
+		a = b;
+	} else {
+		b = 9;
+	}
+	c : int32 = a;
+	return b + c;
+}
+
 main func(): int32
 {
 	a : int32 = 1;
@@ -46,7 +59,7 @@ entry func(): int32
 	first :int32 = 3;
 	second :int32 = cap();
 	sum :int32 = (first) + second - 5;
-	return sum;
+	return sum - cannot_alias_phi();
 }
 
 foo func(): int32
@@ -74,5 +87,16 @@ bar func() : int32
 		res = 1 - cap();
 	}
 	return res;
+}
+
+simple func(): int32
+{
+	simple : int32 = 0;
+	if (1 == 9) {
+	        simple = 1;
+	} else {
+	        simple = 2;
+	}
+	return simple;
 }
 

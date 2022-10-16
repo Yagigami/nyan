@@ -12,6 +12,9 @@
 
 #include <assert.h>
 #include <stdbool.h>
+// TODO: remove
+#include <string.h>
+#include <stdlib.h>
 
 #define LINFO_TYPE 5
 #define LINFO_ALIGN 3
@@ -52,12 +55,13 @@ typedef struct mutated {
 
 typedef struct local_stack {
 	map locals;
-	dyn_arr *mut;
+	mutated *mut; // if not mutated, the name is 0
 	scope *scope;
 	struct local_stack *next;
+	idx_t mut_len;
 } local_stack;
 
-static ssa_ref conv3ac_expr(expr *e, dyn_arr *ins, dyn_arr *locals, local_stack *stk, allocator *a, value_category cat)
+static ssa_ref conv3ac_expr(expr *e, dyn_arr *ins, dyn_arr *locals, local_stack *stk, allocator *a)
 {
 	// ahhh, wouldnt it be nice to just be able to write *p++ = ins{ .op=... }
 	idx_t len = dyn_arr_size(locals) / sizeof(local_info);
@@ -96,21 +100,6 @@ static ssa_ref conv3ac_expr(expr *e, dyn_arr *ins, dyn_arr *locals, local_stack 
 			buf[1] = (ssa_instr){ .v=entry->v };
 			dyn_arr_push(ins, buf, 2*sizeof *buf, a);
 			entry = insert;
-		} else if (cat == LVALUE) {
-			if (it != stk) assert(!map_find(&stk->locals, e->name, string_hash(e->name), _string_cmp2));
-			bool inserted;
-			map_entry *insert = map_id(&stk->locals, e->name, string_hash, _string_cmp2, &inserted, a);
-			insert->k = entry->k;
-			map_entry *scoped = map_find(&it->scope->refs, e->name, string_hash(e->name), _string_cmp2); assert(scoped);
-			// meh
-			type_t *t = scope2decl(scoped->v)->type; assert(t->kind == TYPE_PRIMITIVE);
-			bool b = t->name == tokens.kw_int32;
-			dyn_arr_push(locals, &(local_info){ ssa_linfo(b?4:1, b?4:1, b?SSAT_INT32:SSAT_BOOL) }, sizeof(local_info), a);
-			insert->v = len;
-			if (stk->mut) // this may be NULL if we are mutating a value at function scope: no outer scope cares
-				dyn_arr_push(stk->mut, &(mutated){ .name=e->name, .from=entry->v, .to=insert->v, .in=&it->locals }, sizeof(mutated), a);
-			else assert(!it->next->next);
-			entry = insert;
 		}
 		return entry->v;
 		}
@@ -119,8 +108,8 @@ static ssa_ref conv3ac_expr(expr *e, dyn_arr *ins, dyn_arr *locals, local_stack 
 		local_info i = e->binary.op == '+' || e->binary.op == '-'? ssa_linfo(4, 4, SSAT_INT32): ssa_linfo(1, 1, SSAT_BOOL);
 		dyn_arr_push(locals, &i, sizeof i, a);
 		buf[0].kind = tok2ssa[e->binary.op];
-		buf[0].L = conv3ac_expr(e->binary.L, ins, locals, stk, a, RVALUE);
-		buf[0].R = conv3ac_expr(e->binary.R, ins, locals, stk, a, RVALUE);
+		buf[0].L = conv3ac_expr(e->binary.L, ins, locals, stk, a);
+		buf[0].R = conv3ac_expr(e->binary.R, ins, locals, stk, a);
 		buf[0].to = len;
 		dyn_arr_push(ins, &buf[0], sizeof buf[0], a);
 		return buf[0].to;
@@ -128,14 +117,14 @@ static ssa_ref conv3ac_expr(expr *e, dyn_arr *ins, dyn_arr *locals, local_stack 
 	case EXPR_UNARY:
 		dyn_arr_push(locals, &(local_info){ ssa_linfo(1, 1, SSAT_BOOL) }, sizeof(local_info), a);
 		buf[0].kind = tok2ssa[e->unary.op];
-		buf[0].L = conv3ac_expr(e->unary.operand, ins, locals, stk, a, RVALUE);
+		buf[0].L = conv3ac_expr(e->unary.operand, ins, locals, stk, a);
 		buf[0].to = len;
 		dyn_arr_push(ins, &buf[0], sizeof *buf, a);
 		return buf[0].to;
 	case EXPR_CALL:
 		dyn_arr_push(locals, &(local_info){ ssa_linfo(4, 4, SSAT_INT32) }, sizeof(local_info), a);
 		buf[0].kind = SSA_CALL;
-		buf[0].L = conv3ac_expr(e->call.operand, ins, locals, stk, a, RVALUE);
+		buf[0].L = conv3ac_expr(e->call.operand, ins, locals, stk, a);
 		buf[0].to = len;
 		dyn_arr_push(ins, &buf[0], sizeof buf[0], a);
 		return buf[0].to;
@@ -152,7 +141,7 @@ static void conv3ac_decl(decl_idx i, dyn_arr *ins, dyn_arr *locals, local_stack 
 		{
 		map_entry *entry = map_add(&stk->locals, d->name, string_hash, a);
 		entry->k = d->name;
-		entry->v = conv3ac_expr(d->var_d.init, ins, locals, stk, a, RVALUE);
+		entry->v = conv3ac_expr(d->var_d.init, ins, locals, stk, a);
 		}
 		break;
 	case DECL_FUNC:
@@ -162,11 +151,16 @@ static void conv3ac_decl(decl_idx i, dyn_arr *ins, dyn_arr *locals, local_stack 
 	}
 }
 
-static ssa_ref conv3ac_stmt_block(stmt_block blk, dyn_arr *ins, dyn_arr *locals, scope *nested, local_stack *stk, allocator *a, ssa_ref labels, ssa_ref *label_alloc, dyn_arr *mut);
+// TODO: clean this
+// SO MANY PARAMTERSSSSSS
+// * use a struct for ins, locals
+// * having a stack PLUS mut/mut_len makes no sense
+// * the label situation is also a mess
+static ssa_ref conv3ac_stmt_block(stmt_block blk, dyn_arr *ins, dyn_arr *locals, scope *nested, local_stack *stk, allocator *a, ssa_ref labels, ssa_ref *label_alloc, mutated *mut, idx_t mut_len);
 
 // the scope* param is only for nested scopes to look at.
 // name lookup for decls/exprs is solely done through stk
-static ssa_ref conv3ac_stmt(stmt *s, dyn_arr *ins, dyn_arr *locals, scope **nested, local_stack *stk, allocator *a, ssa_ref labels, ssa_ref *label_alloc, dyn_arr *mut)
+static ssa_ref conv3ac_stmt(stmt *s, dyn_arr *ins, dyn_arr *locals, scope **nested, local_stack *stk, allocator *a, ssa_ref labels, ssa_ref *label_alloc, mutated *mut, idx_t mut_len)
 {
 	switch (s->kind) {
 		ssa_instr buf[2];
@@ -174,30 +168,44 @@ static ssa_ref conv3ac_stmt(stmt *s, dyn_arr *ins, dyn_arr *locals, scope **nest
 		conv3ac_decl(s->d, ins, locals, stk, a);
 		break;
 	case STMT_EXPR:
-		conv3ac_expr(s->e, ins, locals, stk, a, RVALUE);
+		conv3ac_expr(s->e, ins, locals, stk, a);
 		break;
 	case STMT_ASSIGN:
 		{
-		ssa_ref R = conv3ac_expr(s->assign.R, ins, locals, stk, a, RVALUE);
-
-		ssa_ref L = conv3ac_expr(s->assign.L, ins, locals, stk, a, LVALUE);
-		buf[0] = (ssa_instr){ .kind=SSA_COPY, L, R, 1 /* indicates that L is overwritten here */ };
-		dyn_arr_push(ins, buf, sizeof *buf, a);
+		ssa_ref R = conv3ac_expr(s->assign.R, ins, locals, stk, a);
+		assert(s->assign.L->kind == EXPR_NAME);
+		ident_t name = s->assign.L->name;
+		size_t h = string_hash(name);
+		local_stack *it = stk;
+		map_entry *entry = map_find(&it->locals, name, h, _string_cmp2);
+		while (!entry) {
+			it = it->next; assert(it);
+			entry = map_find(&it->locals, name, h, _string_cmp2);
+		}
+		bool inserted;
+		map_entry *insert = map_id(&stk->locals, name, string_hash, _string_cmp2, &inserted, a);
+		if (it != stk) assert(inserted);
+		ssa_ref L = insert->v = dyn_arr_size(locals) / sizeof(ssa_instr);
+		dyn_arr_push(locals, &(local_info){ ssa_linfo(4, 4, SSAT_INT32) }, sizeof(local_info), a);
+		dyn_arr_push(ins, &(ssa_instr){ .kind=SSA_COPY, L, R }, sizeof(ssa_instr), a);
+		if (!stk->mut) // this may be NULL if we are mutating a value at function scope: no outer scope cares
+			assert(!it->next->next);
+		else if (entry->v < stk->mut_len)
+			stk->mut[entry->v] = (mutated){ .name=name, .from=entry->v, .to=insert->v, .in=&it->locals };
 		}
 		break;
 	case STMT_RETURN:
 		{
-		ssa_ref r = conv3ac_expr(s->e, ins, locals, stk, a, RVALUE);
-		buf[0] = (ssa_instr){ .kind=SSA_EPILOGUE };
-		buf[1] = (ssa_instr){ .kind=SSA_RET, r };
-		dyn_arr_push(ins, buf, 2*sizeof *buf, a);
+		ssa_ref r = conv3ac_expr(s->e, ins, locals, stk, a);
+		buf[0] = (ssa_instr){ .kind=SSA_RET, r };
+		dyn_arr_push(ins, buf, sizeof *buf, a);
 		}
 		break;
 	case STMT_BLOCK:
-		return conv3ac_stmt_block(s->blk, ins, locals, (*nested)++, stk, a, labels, label_alloc, mut);
+		return conv3ac_stmt_block(s->blk, ins, locals, (*nested)++, stk, a, labels, label_alloc, mut, mut_len);
 	case STMT_IFELSE:
 		{
-		ssa_ref cond = conv3ac_expr(s->ifelse.cond, ins, locals, stk, a, RVALUE);
+		ssa_ref cond = conv3ac_expr(s->ifelse.cond, ins, locals, stk, a);
 		assert(s->ifelse.cond->kind == EXPR_BINARY);
 		assert(s->ifelse.s_then->kind == STMT_BLOCK && (!s->ifelse.s_else || s->ifelse.s_else->kind == STMT_BLOCK));
 		int tk = s->ifelse.cond->binary.op;
@@ -208,46 +216,49 @@ static ssa_ref conv3ac_stmt(stmt *s, dyn_arr *ins, dyn_arr *locals, scope **nest
 		ssa_ref l_pre = labels, l_then = ++*label_alloc, l_else = ++*label_alloc, l_post = ++*label_alloc;
 		dyn_arr_push(ins, &(ssa_instr){ .kind=cc, cond , l_then, l_else }, sizeof(ssa_instr), a);
 		dyn_arr_push(ins, &(ssa_instr){ .kind=SSA_LABEL, l_then }, sizeof(ssa_instr), a);
-		dyn_arr then_mut;
-		dyn_arr_init(&then_mut, 0, a);
-		conv3ac_stmt(s->ifelse.s_then, ins, locals, nested, stk, a, l_pre, label_alloc, &then_mut);
+		idx_t len = dyn_arr_size(locals) / sizeof(local_info);
+		allocation temp_alloc = ALLOC(a, len * 2 * sizeof(mutated), 8); // 1 for then, 1 for else
+		memset(temp_alloc.addr, 0, temp_alloc.size);
+		mutated *then_mut = temp_alloc.addr, *else_mut = temp_alloc.addr + len * sizeof(mutated);
+		conv3ac_stmt(s->ifelse.s_then, ins, locals, nested, stk, a, l_pre, label_alloc, then_mut, len);
 		dyn_arr_push(ins, &(ssa_instr){ .kind=SSA_GOTO , l_post }, sizeof(ssa_instr), a);
 		dyn_arr_push(ins, &(ssa_instr){ .kind=SSA_LABEL, l_else }, sizeof(ssa_instr), a);
-		dyn_arr else_mut;
-		dyn_arr_init(&else_mut, 0, a);
 		if (s->ifelse.s_else)
-			conv3ac_stmt(s->ifelse.s_else, ins, locals, nested, stk, a, l_pre, label_alloc, &else_mut);
+			conv3ac_stmt(s->ifelse.s_else, ins, locals, nested, stk, a, l_pre, label_alloc, else_mut, len);
 		dyn_arr_push(ins, &(ssa_instr){ .kind=SSA_GOTO , l_post }, sizeof(ssa_instr), a);
 		dyn_arr_push(ins, &(ssa_instr){ .kind=SSA_LABEL, l_post }, sizeof(ssa_instr), a);
 
-		// TODO: make if { ... } else { ... } forget about the l_pre value to only have 1 phi
-		// and only   if { ... }              should remember it
-		for (mutated *it = then_mut.buf.addr, *end = then_mut.end; it != end; it++) {
+		for (idx_t i = 0; i < len; i++) {
+			mutated *in_then = then_mut + i, *in_else = else_mut + i;
+			if (!in_then->name && !in_else->name) {
+				continue;
+			}
 			ssa_ref dest = dyn_arr_size(locals) / sizeof(local_info);
+			// TODO: bool exists
 			local_info linfo = ssa_linfo(4, 4, SSAT_INT32);
 			dyn_arr_push(locals, &linfo, sizeof linfo, a);
-			buf[0] = (ssa_instr){ .kind=SSA_PHI, dest, it->from, it->to };
-			buf[1] = (ssa_instr){ .L=l_pre, .R=l_then };
+			mutated *m = in_then->name ? in_then: in_else;
+			if (!in_else->name) {
+				assert(in_then->from == i);
+				buf[0] = (ssa_instr){ .kind=SSA_PHI, dest, in_then->from, in_then->to };
+				buf[1] = (ssa_instr){ .L=l_pre, .R=l_then };
+			} else if (!in_then->name) {
+				assert(in_else->from == i);
+				buf[0] = (ssa_instr){ .kind=SSA_PHI, dest, in_else->from, in_else->to };
+				buf[1] = (ssa_instr){ .L=l_pre, .R=l_else };
+			} else {
+				assert(in_then->from == i);
+				assert(in_else->from == i);
+				buf[0] = (ssa_instr){ .kind=SSA_PHI, dest, in_then->to, in_else->to };
+				buf[1] = (ssa_instr){ .L=l_then, .R=l_else };
+			}
 			dyn_arr_push(ins, buf, 2*sizeof *buf, a);
-			// propagate the mutation
-			if (stk->mut) dyn_arr_push(stk->mut, &(mutated){ .name=it->name, it->in, it->from, dest }, sizeof(mutated), a);
-			map_entry *e = map_find(it->in, it->name, string_hash(it->name), _string_cmp2); assert(e);
+			if (m->from < stk->mut_len)
+				stk->mut[m->from] = (mutated){ .name=m->name, m->in, m->from, dest };
+			map_entry *e = map_find(m->in, m->name, string_hash(m->name), _string_cmp2); assert(e);
 			e->v = dest;
 		}
-		dyn_arr_fini(&then_mut, a);
-
-		for (mutated *it = else_mut.buf.addr, *end = else_mut.end; it != end; it++) {
-			ssa_ref dest = dyn_arr_size(locals) / sizeof(local_info);
-			local_info linfo = ssa_linfo(4, 4, SSAT_INT32);
-			dyn_arr_push(locals, &linfo, sizeof linfo, a);
-			buf[0] = (ssa_instr){ .kind=SSA_PHI, dest, it->from, it->to };
-			buf[1] = (ssa_instr){ .L=l_pre, .R=l_else };
-			dyn_arr_push(ins, buf, 2*sizeof *buf, a);
-			if (stk->mut) dyn_arr_push(stk->mut, &(mutated){ .name=it->name, it->in, it->from, dest }, sizeof(mutated), a);
-			map_entry *e = map_find(it->in, it->name, string_hash(it->name), _string_cmp2); assert(e);
-			e->v = dest;
-		}
-		dyn_arr_fini(&else_mut, a);
+		DEALLOC(a, temp_alloc);
 
 		return l_post;
 		}
@@ -257,14 +268,15 @@ static ssa_ref conv3ac_stmt(stmt *s, dyn_arr *ins, dyn_arr *locals, scope **nest
 	return labels;
 }
 
-ssa_ref conv3ac_stmt_block(stmt_block blk, dyn_arr *ins, dyn_arr *locals, scope *link, local_stack *stk, allocator *a, ssa_ref labels, ssa_ref *label_alloc, dyn_arr *mut)
+ssa_ref conv3ac_stmt_block(stmt_block blk, dyn_arr *ins, dyn_arr *locals, scope *link, local_stack *stk, allocator *a, ssa_ref labels, ssa_ref *label_alloc, mutated *mut, idx_t mut_len)
 {
 	local_stack top = { .scope=link, .next=stk };
 	map_init(&top.locals, 2, a);
 	scope *sub = scratch_start(link->sub);
 	top.mut = mut; // cannot be embedded in the stack here because it needs to be accessed after the stmt_block call returns
+	top.mut_len = mut_len;
 	for (stmt **it = scratch_start(blk), **end = scratch_end(blk); it != end; it++) {
-		labels = conv3ac_stmt(*it, ins, locals, &sub, &top, a, labels, label_alloc, mut);
+		labels = conv3ac_stmt(*it, ins, locals, &sub, &top, a, labels, label_alloc, mut, mut_len);
 	}
 	map_fini(&top.locals, a);
 	return *label_alloc;
@@ -278,7 +290,7 @@ static void conv3ac_func(decl *d, ssa_sym *to, scope *link, local_stack *stk, al
 	dyn_arr_push(&ins, &(ssa_instr){ .kind=SSA_PROLOGUE }, sizeof(ssa_instr), a);
 	dyn_arr_push(&ins, &(ssa_instr){ .kind=SSA_LABEL, .to=0 }, sizeof(ssa_instr), a);
 	to->labels = 0;
-	conv3ac_stmt_block(d->func_d.body, &ins, &locals, link, stk, a, 0, &to->labels, NULL);
+	conv3ac_stmt_block(d->func_d.body, &ins, &locals, link, stk, a, 0, &to->labels, NULL, 0);
 	to->ins = scratch_from(&ins, a, a);
 	to->locals = scratch_from(&locals, a, a);
 	to->name = d->name;
@@ -305,54 +317,111 @@ ssa_module convert_to_3ac(module_t module, scope *sc, allocator *a)
 	return scratch_from(&defs, a, a);
 }
 
+typedef struct patch_me { idx_t src_idx; ssa_ref to, from; } patch_me;
+static int patch_me_cmp(const void *L_, const void *R_)
+{
+	const patch_me *L = L_, *R = R_;
+	return L->src_idx - R->src_idx;
+}
+
+static ssa_ref global_num_locals;
 static ins_buf pass_2ac(ins_buf src, allocator *a)
 {
 	dyn_arr dst;
 	dyn_arr_init(&dst, 0*sizeof(ssa_instr), a);
+	allocation aset = ALLOC(a, global_num_locals * sizeof(idx_t), 4);
+	idx_t *set = aset.addr;
+	dyn_arr patch;
+	dyn_arr_init(&patch, 0*sizeof(patch_me), a);
+	ssa_ref idx;
 	for (ssa_instr *it = scratch_start(src), *end = scratch_end(src);
-			it != end; it++) switch (it->kind) {
+			it != end; it++) switch (idx = it->to, it->kind) {
 		ssa_instr buf[2];
 		case SSA_INT:
 			dyn_arr_push(&dst, it, sizeof *it, a), it++;
 			/* fallthrough */
 		case SSA_GLOBAL_REF:
-			assert(it != end);
 			dyn_arr_push(&dst, it, sizeof *it, a), it++;
 			/* fallthrough */
 		case SSA_CALL:
+		case SSA_CMP:
 		case SSA_COPY:
-		case SSA_RET:
-		case SSA_PROLOGUE: case SSA_EPILOGUE:
-		case SSA_BOOL:
-		case SSA_BOOL_NEG: case SSA_CMP:
-		case SSA_GOTO: case SSA_LABEL:
 			// nop
-			assert(it != end);
 			dyn_arr_push(&dst, it, sizeof *it, a);
-			break;
+			goto set_local;
 		case SSA_ADD:
 		case SSA_SUB:
 			// a = add b, c => a = b; a = add a c
 			buf[0] = (ssa_instr){ .kind=SSA_COPY, .to=it->to, .L=it->L };
 			buf[1] = (ssa_instr){ .kind=it->kind, .to=it->to, .L=it->to, .R = it->R };
 			dyn_arr_push(&dst, buf, 2*sizeof *buf, a);
-			break;
+			goto set_local;
+		case SSA_GOTO: case SSA_LABEL:
+		case SSA_PROLOGUE:
+		case SSA_RET:
+			dyn_arr_push(&dst, it, sizeof *it, a);
+			continue;
 		case SSA_BEQ: case SSA_BNEQ: case SSA_BLT: case SSA_BLEQ: case SSA_BGT: case SSA_BGEQ:
 			buf[0] = (ssa_instr){ .kind=it->kind, .to=it->to, .L=it->L }; // .R loses meaning now
 			buf[1] = (ssa_instr){ .kind=SSA_GOTO, .to=it->R };
 			dyn_arr_push(&dst, buf, 2*sizeof *buf, a);
-			break;
+			continue;
 		case SSA_PHI:
+			dyn_arr_push(&patch, &(patch_me){ set[it->L], it->to, it->L }, sizeof(patch_me), a);
+			dyn_arr_push(&patch, &(patch_me){ set[it->R], it->to, it->R }, sizeof(patch_me), a);
+			it++;
+			goto set_local;
+		case SSA_BOOL:
+		case SSA_BOOL_NEG:
 		default:
 			assert(0);
+		set_local:
+			set[idx] = dyn_arr_size(&dst);
+			continue;
 	}
-	return scratch_from(&dst, a, a);
+	idx_t num_patch = dyn_arr_size(&patch) / sizeof(patch_me);
+	if (num_patch == 0) return scratch_from(&dst, a, a);
+
+	// TODO: incorrect: need to insert at the end of the referenced label (hear `offset = label(ref+1)-1`)
+	// for now I bypass this issue *i think* by making sure instr->to is always defined inside of the right label
+
+	// TODO: yeah this size is stupid -> change api a bit
+	idx_t num_phi = num_patch / 2;
+	dyn_arr second_pass;
+	dyn_arr_init(&second_pass, dyn_arr_size(&dst) + (num_patch - num_phi) * sizeof (ssa_instr), a);
+	// TODO: remove
+	qsort(patch.buf.addr, num_patch, sizeof(patch_me), patch_me_cmp);
+	idx_t at = 0;
+	for (patch_me *p = patch.buf.addr, *end = patch.end; p != end; p++) {
+		for (idx_t src_idx = at; src_idx < p->src_idx; src_idx += sizeof(ssa_instr)) {
+			ssa_instr *i = dst.buf.addr + src_idx;
+			if (i->kind == SSA_PHI) continue;
+			dyn_arr_push(&second_pass, dst.buf.addr + src_idx, sizeof(ssa_instr), a);
+			if (i->kind != SSA_INT && i->kind != SSA_GLOBAL_REF) continue;
+			src_idx += sizeof(ssa_instr);
+			dyn_arr_push(&second_pass, dst.buf.addr + src_idx, sizeof(ssa_instr), a);
+			if (i->kind != SSA_INT) continue;
+			src_idx += sizeof(ssa_instr);
+			dyn_arr_push(&second_pass, dst.buf.addr + src_idx, sizeof(ssa_instr), a);
+		}
+		dyn_arr_push(&second_pass, &(ssa_instr){ .kind=SSA_COPY, p->to, p->from }, sizeof(ssa_instr), a);
+		at = p->src_idx;
+	}
+	for (idx_t src_idx = at; src_idx < dyn_arr_size(&dst); src_idx += sizeof(ssa_instr))
+		dyn_arr_push(&second_pass, dst.buf.addr + src_idx, sizeof(ssa_instr), a);
+	dyn_arr_fini(&dst, a);
+	dyn_arr_fini(&patch, a);
+	DEALLOC(a, aset);
+	return scratch_from(&second_pass, a, a);
 }
 
 void ssa_run_pass(ssa_module mod, ssa_pass pass, allocator *a)
 {
 	for (ssa_sym *sym = scratch_start(mod), *end = scratch_end(mod);
 			sym != end; sym++) {
+		// TODO: remove
+		global_num_locals = scratch_len(sym->locals) / sizeof(local_info);
+
 		ins_buf next = pass(sym->ins, a);
 		scratch_fini(sym->ins, a);
 		sym->ins = next;
@@ -383,11 +452,15 @@ void test_3ac(void)
 
 	if (!ast.errors) {
 		ssa_module ssa_3ac = convert_to_3ac(module, &global, gpa);
+		print(stdout, "SSA form:\n");
+		dump_3ac(ssa_3ac);
 		// in reality, all the AST objects can be freed here
 		// only tokens.idents and perma need to keep existing until the object file is made
-		dump_3ac(ssa_3ac);
-		goto after_objfile;
+		// goto after_objfile;
+
 		ssa_run_pass(ssa_3ac, pass_2ac, gpa);
+		print(stdout, "2-address code:\n");
+		dump_3ac(ssa_3ac);
 
 		gen_module g = gen_x86_64(ssa_3ac, gpa);
 		int e = elf_object_from(&g, "basic.o", gpa);

@@ -24,7 +24,7 @@ enum ssa_opcode
 	SSA_GLOBAL_REF, // 1 extension
 	SSA_COPY,
 	SSA_RET,
-	SSA_PROLOGUE, SSA_EPILOGUE,
+	SSA_PROLOGUE,
 	SSA_BOOL, // the value is embedded in the L field
 	SSA_CMP,
 	SSA_BOOL_NEG,

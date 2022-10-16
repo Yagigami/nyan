@@ -36,9 +36,9 @@ test: $(OUT)/$(TEST)
 
 dump: $(OUT)/$(TEST)
 	$<
-	# objdump -Dwr --insn-width=12 basic.o
-	# ld rt.o basic.o
-	# ./a.out
+	objdump -Dwr --insn-width=12 basic.o
+	ld rt.o basic.o
+	./a.out
 
 $(OUT)/$(TEST): $(OUT)/$(TEST).o $(OBJ)
 	@echo LD $<

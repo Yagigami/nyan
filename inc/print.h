@@ -20,7 +20,7 @@ bool expect_or(bool condition, ...);
 #define print(to,...) _print_impl((to), \
 		((MSK(__VA_ARGS__))<<ARGS_SHIFT)|NUM_ARGS(_, ## __VA_ARGS__), \
 		## __VA_ARGS__)
-#define expect_or(cond, ...) ((cond) ? true: (print(stderr, ## __VA_ARGS__), ast_one_more_error(), false)) // STUPID PRECEDENCE RULES LOL
+#define expect_or(cond, ...) ((cond) ? true: (print(stderr, ## __VA_ARGS__, "\n"), ast_one_more_error(), false)) // STUPID PRECEDENCE RULES LOL
 
 typedef enum printable {
 	P_STRING,
