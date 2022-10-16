@@ -128,17 +128,18 @@ expr *parse_expr_add(allocator *up)
 {
 	expr *L = parse_expr_prefix(up);
 	token snapshot = tokens.current;
-	if (token_match_precedence('+')) {
+	while (token_match_precedence('+')) {
 		token_kind kind = snapshot.kind;
 		assert(kind == '+' || kind == '-');
-		expr *R = parse_expr_add(up);
+		expr *R = parse_expr_prefix(up);
 		expr *sum = ALLOC(up, sizeof *sum, 8).addr;
 		sum->binary.L = L;
 		sum->binary.R = R;
 		sum->binary.op = kind;
 		sum->kind = EXPR_BINARY;
 		sum->pos = snapshot.pos;
-		return sum;
+		L = sum;
+		snapshot = tokens.current;
 	}
 	return L;
 }
@@ -332,11 +333,7 @@ void test_ast(void)
 	resolve_refs(module, &global, ast.temps, &perma.base);
 	type_check(module, &global);
 
-	for (scope *it = scratch_start(global.sub), *end = scratch_end(global.sub);
-			it != end; it++)
-		map_fini(&it->refs, ast.temps);
-	map_fini(&global.refs, ast.temps);
-
+	scope_fini(&global, gpa);
 	token_fini();
 	map_fini(&tokens.idents, gpa);
 	allocator_geom_fini(&perma);

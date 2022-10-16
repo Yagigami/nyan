@@ -8,6 +8,8 @@
 #include "map.h"
 
 
+// TODO: make AST more compact
+
 typedef int32_t idx_t;
 typedef idx_t decl_idx;
 

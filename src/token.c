@@ -10,10 +10,7 @@
 #include <ctype.h>
 #include <assert.h>
 
-#define IDENT_MAX_LEN 16
-#define IDENT_SHIFT 4
-#define IDENT_LEN_MASK ((1<<IDENT_SHIFT)-1)
-static_assert(IDENT_MAX_LEN-1 < (1<<IDENT_SHIFT), "increase IDENT_SHIFT");
+#define IDENT_MAX_LEN 32
 
 
 struct global_token_state tokens;
@@ -223,10 +220,19 @@ void test_token(void)
 
 size_t string_hash(key_t k)
 {
-	size_t h = 0x23be1793daa2779fU;
+	size_t h = 0x23be1793daa2779fUL;
 	for (const char *c = (char*) k; isalpha(*c); c++)
 		h = h*15 ^ (*c * h);
 	return h;
+}
+
+size_t intern_hash(key_t k)
+{
+	for (int i=0; i<4; i++) {
+		k ^= 0xd7ea8d188bbe10L;
+		k *= 0x030bdbe1678abdL;
+	}
+	return k;
 }
 
 static int _string_cmp(key_t L, key_t R)
@@ -235,7 +241,11 @@ static int _string_cmp(key_t L, key_t R)
 	for (; isalpha(*lc) && isalpha(*rc); lc++, rc++) {
 		if (*lc != *rc) return *lc - *rc;
 	}
-	return 0;
+	// just need a `==` or `!=` test, so the result
+	// doesnt have to give an ordering
+	if (!isalpha(*lc) && !isalpha(*rc))
+		return 0;
+	return 1;
 }
 
 ident_t intern_string(source_idx start, size_t len)

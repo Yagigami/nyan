@@ -94,6 +94,7 @@ source_idx find_line(source_idx offset);
 void token_skip_to_newline(void);
 
 size_t string_hash(key_t k);
+size_t intern_hash(key_t k);
 
 source_idx token_pos(void);
 const char *token_source(source_idx pos);

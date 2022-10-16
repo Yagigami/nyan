@@ -18,6 +18,7 @@ typedef struct scope_stack_l {
 } scope_stack_l;
 
 void resolve_refs(module_t of, scope *to, allocator *up, allocator *final);
+void scope_fini(scope *s, allocator *a);
 decl *scope2decl(val_t v);
 
 #endif /* CROUTE_SYMBOL_H */

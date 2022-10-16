@@ -76,6 +76,7 @@ allocation allocator_realloc(allocator *a, allocation m, size_t size, size_t ali
 	if (!size) return ALLOC_FAILURE;
 	assert(align <= 16);
 	void *addr = realloc(m.addr, size);
+
 	return ALLOC_SUCCESS(addr, size);
 }
 

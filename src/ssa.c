@@ -77,22 +77,22 @@ static ssa_ref conv3ac_expr(expr *e, dyn_arr *ins, dyn_arr *locals, local_stack 
 		dyn_arr_push(ins, buf, 3*sizeof *buf, a);
 		return buf[0].to;
 	case EXPR_BOOL:
-		dyn_arr_push(locals, &(local_info){ ssa_linfo(1, 1, SSAT_INT32) }, sizeof(local_info), a);
+		dyn_arr_push(locals, &(local_info){ ssa_linfo(1, 1, SSAT_BOOL) }, sizeof(local_info), a);
 		buf[0] = (ssa_instr){ .kind=SSA_BOOL, .to=len, .L=e->name == tokens.kw_true };
 		assert((buf[0].L & ~1) == 0);
 		dyn_arr_push(ins, buf, sizeof *buf, a);
 		return buf[0].to;
 	case EXPR_NAME:
 		{
-		map_entry *entry = map_find(&stk->locals, e->name, string_hash(e->name), _string_cmp2);
+		map_entry *entry = map_find(&stk->locals, e->name, intern_hash(e->name), _string_cmp2);
 		local_stack *it = stk;
 		while (!entry) {
 			it = it->next;
 			assert(it);
-			entry = map_find(&it->locals, e->name, string_hash(e->name), _string_cmp2);
+			entry = map_find(&it->locals, e->name, intern_hash(e->name), _string_cmp2);
 		}
 		if (!it->next) { // it is the bottom of the stack -> it is a global
-			map_entry *insert = map_add(&stk->locals, e->name, string_hash, a);
+			map_entry *insert = map_add(&stk->locals, e->name, intern_hash, a);
 			insert->k = entry->k;
 			dyn_arr_push(locals, &(local_info){ ssa_linfo(0, 1, SSAT_NONE) }, sizeof(local_info), a);
 			insert->v = len;
@@ -105,6 +105,7 @@ static ssa_ref conv3ac_expr(expr *e, dyn_arr *ins, dyn_arr *locals, local_stack 
 		}
 	case EXPR_BINARY:
 		{
+		// FIXME: clean up
 		local_info i = e->binary.op == '+' || e->binary.op == '-'? ssa_linfo(4, 4, SSAT_INT32): ssa_linfo(1, 1, SSAT_BOOL);
 		dyn_arr_push(locals, &i, sizeof i, a);
 		buf[0].kind = tok2ssa[e->binary.op];
@@ -115,6 +116,7 @@ static ssa_ref conv3ac_expr(expr *e, dyn_arr *ins, dyn_arr *locals, local_stack 
 		return buf[0].to;
 		}
 	case EXPR_UNARY:
+		// FIXME: clean up
 		dyn_arr_push(locals, &(local_info){ ssa_linfo(1, 1, SSAT_BOOL) }, sizeof(local_info), a);
 		buf[0].kind = tok2ssa[e->unary.op];
 		buf[0].L = conv3ac_expr(e->unary.operand, ins, locals, stk, a);
@@ -122,6 +124,7 @@ static ssa_ref conv3ac_expr(expr *e, dyn_arr *ins, dyn_arr *locals, local_stack 
 		dyn_arr_push(ins, &buf[0], sizeof *buf, a);
 		return buf[0].to;
 	case EXPR_CALL:
+		// FIXME: clean up
 		dyn_arr_push(locals, &(local_info){ ssa_linfo(4, 4, SSAT_INT32) }, sizeof(local_info), a);
 		buf[0].kind = SSA_CALL;
 		buf[0].L = conv3ac_expr(e->call.operand, ins, locals, stk, a);
@@ -139,7 +142,7 @@ static void conv3ac_decl(decl_idx i, dyn_arr *ins, dyn_arr *locals, local_stack 
 	switch (d->kind) {
 	case DECL_VAR:
 		{
-		map_entry *entry = map_add(&stk->locals, d->name, string_hash, a);
+		map_entry *entry = map_add(&stk->locals, d->name, intern_hash, a);
 		entry->k = d->name;
 		entry->v = conv3ac_expr(d->var_d.init, ins, locals, stk, a);
 		}
@@ -175,7 +178,7 @@ static ssa_ref conv3ac_stmt(stmt *s, dyn_arr *ins, dyn_arr *locals, scope **nest
 		ssa_ref R = conv3ac_expr(s->assign.R, ins, locals, stk, a);
 		assert(s->assign.L->kind == EXPR_NAME);
 		ident_t name = s->assign.L->name;
-		size_t h = string_hash(name);
+		size_t h = intern_hash(name);
 		local_stack *it = stk;
 		map_entry *entry = map_find(&it->locals, name, h, _string_cmp2);
 		while (!entry) {
@@ -183,9 +186,12 @@ static ssa_ref conv3ac_stmt(stmt *s, dyn_arr *ins, dyn_arr *locals, scope **nest
 			entry = map_find(&it->locals, name, h, _string_cmp2);
 		}
 		bool inserted;
-		map_entry *insert = map_id(&stk->locals, name, string_hash, _string_cmp2, &inserted, a);
+		map_entry *insert = map_id(&stk->locals, name, intern_hash, _string_cmp2, &inserted, a);
 		if (it != stk) assert(inserted);
+		// FIXME: this is a hack, normally L should just be R and there should be no COPY
+		// instruction in the SSA form, this can be corrected after the phi-removal is correct
 		ssa_ref L = insert->v = dyn_arr_size(locals) / sizeof(ssa_instr);
+		// FIXME: type
 		dyn_arr_push(locals, &(local_info){ ssa_linfo(4, 4, SSAT_INT32) }, sizeof(local_info), a);
 		dyn_arr_push(ins, &(ssa_instr){ .kind=SSA_COPY, L, R }, sizeof(ssa_instr), a);
 		if (!stk->mut) // this may be NULL if we are mutating a value at function scope: no outer scope cares
@@ -207,6 +213,8 @@ static ssa_ref conv3ac_stmt(stmt *s, dyn_arr *ins, dyn_arr *locals, scope **nest
 		{
 		ssa_ref cond = conv3ac_expr(s->ifelse.cond, ins, locals, stk, a);
 		assert(s->ifelse.cond->kind == EXPR_BINARY);
+		// FIXME: right now, if/else all need to create new scopes to produce correct results
+		// fix this mess
 		assert(s->ifelse.s_then->kind == STMT_BLOCK && (!s->ifelse.s_else || s->ifelse.s_else->kind == STMT_BLOCK));
 		int tk = s->ifelse.cond->binary.op;
 		int cc = tk == TOKEN_EQ ? SSA_BEQ : tk == TOKEN_NEQ? SSA_BNEQ:
@@ -225,7 +233,7 @@ static ssa_ref conv3ac_stmt(stmt *s, dyn_arr *ins, dyn_arr *locals, scope **nest
 		dyn_arr_push(ins, &(ssa_instr){ .kind=SSA_LABEL, l_else }, sizeof(ssa_instr), a);
 		if (s->ifelse.s_else)
 			conv3ac_stmt(s->ifelse.s_else, ins, locals, nested, stk, a, l_pre, label_alloc, else_mut, len);
-		dyn_arr_push(ins, &(ssa_instr){ .kind=SSA_GOTO , l_post }, sizeof(ssa_instr), a);
+		// dyn_arr_push(ins, &(ssa_instr){ .kind=SSA_GOTO , l_post }, sizeof(ssa_instr), a);
 		dyn_arr_push(ins, &(ssa_instr){ .kind=SSA_LABEL, l_post }, sizeof(ssa_instr), a);
 
 		for (idx_t i = 0; i < len; i++) {
@@ -255,7 +263,7 @@ static ssa_ref conv3ac_stmt(stmt *s, dyn_arr *ins, dyn_arr *locals, scope **nest
 			dyn_arr_push(ins, buf, 2*sizeof *buf, a);
 			if (m->from < stk->mut_len)
 				stk->mut[m->from] = (mutated){ .name=m->name, m->in, m->from, dest };
-			map_entry *e = map_find(m->in, m->name, string_hash(m->name), _string_cmp2); assert(e);
+			map_entry *e = map_find(m->in, m->name, intern_hash(m->name), _string_cmp2); assert(e);
 			e->v = dest;
 		}
 		DEALLOC(a, temp_alloc);
@@ -308,7 +316,7 @@ ssa_module convert_to_3ac(module_t module, scope *sc, allocator *a)
 		decl *d = idx2decl(*decl_it);
 		assert(d->kind == DECL_FUNC);
 		ssa_sym *sym = dyn_arr_push(&defs, NULL, sizeof(ssa_sym), a);
-		map_entry *e = map_add(&stk.locals, d->name, string_hash, a);
+		map_entry *e = map_add(&stk.locals, d->name, intern_hash, a);
 		e->k = d->name;
 		sym->idx = e->v = decl_it - decl_start;
 		conv3ac_func(d, sym, scope_it, &stk, a);
@@ -323,6 +331,12 @@ static int patch_me_cmp(const void *L_, const void *R_)
 	const patch_me *L = L_, *R = R_;
 	return L->src_idx - R->src_idx;
 }
+
+static const enum ssa_opcode invert_cc[SSA_BGEQ - SSA_BEQ + 1] = {
+	[SSA_BEQ - SSA_BEQ] = SSA_BNEQ, [SSA_BNEQ - SSA_BEQ] = SSA_BEQ,
+	[SSA_BLT - SSA_BEQ] = SSA_BGEQ, [SSA_BLEQ - SSA_BEQ] = SSA_BGT,
+	[SSA_BGT - SSA_BEQ] = SSA_BLEQ, [SSA_BGEQ - SSA_BEQ] = SSA_BLT,
+};
 
 static ssa_ref global_num_locals;
 static ins_buf pass_2ac(ins_buf src, allocator *a)
@@ -362,9 +376,9 @@ static ins_buf pass_2ac(ins_buf src, allocator *a)
 			dyn_arr_push(&dst, it, sizeof *it, a);
 			continue;
 		case SSA_BEQ: case SSA_BNEQ: case SSA_BLT: case SSA_BLEQ: case SSA_BGT: case SSA_BGEQ:
-			buf[0] = (ssa_instr){ .kind=it->kind, .to=it->to, .L=it->L }; // .R loses meaning now
-			buf[1] = (ssa_instr){ .kind=SSA_GOTO, .to=it->R };
-			dyn_arr_push(&dst, buf, 2*sizeof *buf, a);
+			buf[0] = (ssa_instr){ .kind=invert_cc[it->kind - SSA_BEQ], it->to, it->R }; // .R loses meaning now
+			// buf[1] = (ssa_instr){ .kind=SSA_GOTO, .to=it->R };
+			dyn_arr_push(&dst, buf, 1*sizeof *buf, a);
 			continue;
 		case SSA_PHI:
 			dyn_arr_push(&patch, &(patch_me){ set[it->L], it->to, it->L }, sizeof(patch_me), a);
@@ -380,21 +394,23 @@ static ins_buf pass_2ac(ins_buf src, allocator *a)
 			continue;
 	}
 	idx_t num_patch = dyn_arr_size(&patch) / sizeof(patch_me);
-	if (num_patch == 0) return scratch_from(&dst, a, a);
+	if (num_patch == 0) return DEALLOC(a, aset), scratch_from(&dst, a, a);
 
-	// TODO: incorrect: need to insert at the end of the referenced label (hear `offset = label(ref+1)-1`)
+	// FIXME: incorrect: need to insert at the end of the referenced label (hear `offset = label(ref+1)-1`)
 	// for now I bypass this issue *i think* by making sure instr->to is always defined inside of the right label
+	// but if the code that is fed in this optimizes the copies out, this will not work
 
-	// TODO: yeah this size is stupid -> change api a bit
+	// FIXME: yeah this size is stupid -> change api a bit
 	idx_t num_phi = num_patch / 2;
 	dyn_arr second_pass;
 	dyn_arr_init(&second_pass, dyn_arr_size(&dst) + (num_patch - num_phi) * sizeof (ssa_instr), a);
-	// TODO: remove
 	qsort(patch.buf.addr, num_patch, sizeof(patch_me), patch_me_cmp);
 	idx_t at = 0;
 	for (patch_me *p = patch.buf.addr, *end = patch.end; p != end; p++) {
 		for (idx_t src_idx = at; src_idx < p->src_idx; src_idx += sizeof(ssa_instr)) {
 			ssa_instr *i = dst.buf.addr + src_idx;
+			// TODO: maybe store the phi indices in the first pass
+			// and use them to avoid decoding in the second pass
 			if (i->kind == SSA_PHI) continue;
 			dyn_arr_push(&second_pass, dst.buf.addr + src_idx, sizeof(ssa_instr), a);
 			if (i->kind != SSA_INT && i->kind != SSA_GLOBAL_REF) continue;
@@ -407,7 +423,7 @@ static ins_buf pass_2ac(ins_buf src, allocator *a)
 		dyn_arr_push(&second_pass, &(ssa_instr){ .kind=SSA_COPY, p->to, p->from }, sizeof(ssa_instr), a);
 		at = p->src_idx;
 	}
-	for (idx_t src_idx = at; src_idx < dyn_arr_size(&dst); src_idx += sizeof(ssa_instr))
+	for (idx_t src_idx = at; src_idx < (idx_t)dyn_arr_size(&dst); src_idx += sizeof(ssa_instr))
 		dyn_arr_push(&second_pass, dst.buf.addr + src_idx, sizeof(ssa_instr), a);
 	dyn_arr_fini(&dst, a);
 	dyn_arr_fini(&patch, a);
@@ -452,11 +468,12 @@ void test_3ac(void)
 
 	if (!ast.errors) {
 		ssa_module ssa_3ac = convert_to_3ac(module, &global, gpa);
+		scope_fini(&global, ast.temps);
+		allocator_geom_fini(&just_ast);
+		ast_fini(gpa);
+
 		print(stdout, "SSA form:\n");
 		dump_3ac(ssa_3ac);
-		// in reality, all the AST objects can be freed here
-		// only tokens.idents and perma need to keep existing until the object file is made
-		// goto after_objfile;
 
 		ssa_run_pass(ssa_3ac, pass_2ac, gpa);
 		print(stdout, "2-address code:\n");
@@ -480,16 +497,11 @@ void test_3ac(void)
 		}
 		scratch_fini(ssa_3ac, gpa);
 	}
-after_objfile:
 
-	for (scope *it = scratch_start(global.sub), *end = scratch_end(global.sub);
-			it != end; it++)
-		map_fini(&it->refs, ast.temps);
-	map_fini(&global.refs, ast.temps);
-	allocator_geom_fini(&just_ast);
+	// FIXME: right now i need to free those after the object file is generated.
+	// technically i only need the permanent (read: static) objects' names to be
+	// preserved.
 	map_fini(&tokens.idents, tokens.up);
-	ast_fini(gpa);
-
 	allocator_geom_fini(&perma);
 }
 

@@ -52,10 +52,10 @@ static type_t *type_check_expr(expr *e, scope_stack_l *stk, value_category c)
 		return &type_bool;
 	case EXPR_NAME:
 		{
-		map_entry *entry = map_find(&stk->scope->refs, e->name, string_hash(e->name), _string_cmp2);
+		map_entry *entry = map_find(&stk->scope->refs, e->name, intern_hash(e->name), _string_cmp2);
 		while (!entry && stk->next) {
 			stk = stk->next;
-			entry = map_find(&stk->scope->refs, e->name, string_hash(e->name), _string_cmp2);
+			entry = map_find(&stk->scope->refs, e->name, intern_hash(e->name), _string_cmp2);
 		}
 		return entry? scope2decl(entry->v)->type: &type_missing;
 		}

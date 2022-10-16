@@ -58,8 +58,9 @@ entry func(): int32
 {
 	first :int32 = 3;
 	second :int32 = cap();
+	wow_this_name_is_extremely_long :int32 = first;
 	sum :int32 = (first) + second - 5;
-	return sum - cannot_alias_phi();
+	return sum - cannot_alias_phi() - 2;
 }
 
 foo func(): int32
