@@ -147,29 +147,17 @@ static byte *test(byte *p, enum x86_64_reg L, enum x86_64_reg R, int bits)
 	return p;
 }
 
-static byte *setcc_mem(byte *p, idx_t offset, enum ssa_opcode opc)
-{
-	*p++ = 0x0f;
-	*p++ = opc == SSA_CMPEQ ? 0x94:
-	       opc == SSA_CMPNEQ? 0x95:
-	       opc == SSA_CMPLT ? 0x9c:
-	       opc == SSA_CMPLEQ? 0x9e:
-	       opc == SSA_CMPGT ? 0x9f:
-	       opc == SSA_CMPGEQ? 0x9d:
-	       (assert(0), -1);
-	*p++ = modrm(2, RBP, 0);
-	return imm32(p, offset);
-}
-
 static idx_t gen_symbol(gen_sym *dst, ssa_sym *src, allocator *a)
 {
 	dst->name = src->name;
 	dst->idx  = src->idx ;
-	dyn_arr ins, refs;
+	dyn_arr ins, refs, label_relocs;
 	dyn_arr_init(&ins, 0, a);
 	dyn_arr_init(&refs, 0, a);
+	dyn_arr_init(&label_relocs, 0*sizeof(idx_pair), a);
 
-	allocation temp_alloc;
+	allocation temp_alloc, ta2 = ALLOC(a, src->labels * sizeof(idx_pair), 4);
+	idx_t *labels = ta2.addr;
 	idx_t stack_space;
 	idx_t *locals = gen_lalloc(src->locals, &stack_space, &temp_alloc, a);
 
@@ -177,19 +165,39 @@ static idx_t gen_symbol(gen_sym *dst, ssa_sym *src, allocator *a)
 			i != end; i++) {
 		byte buf[64], *p = buf;
 		switch (i->kind) {
+			case SSA_GOTO:
+				*p++ = 0xe9;
+				dyn_arr_push(&label_relocs, &(idx_pair){ .lo=dyn_arr_size(&ins) + 1, .hi=i->to }, sizeof(idx_pair), a);
+				p = imm32(p, 0);
+				break;
+			case SSA_BEQ: case SSA_BNEQ: case SSA_BLT: case SSA_BLEQ: case SSA_BGT: case SSA_BGEQ:
+				*p++ = 0x0f;
+				*p++ = i->kind == SSA_BEQ ? 0x84:
+					i->kind == SSA_BNEQ? 0x85:
+					i->kind == SSA_BLT ? 0x8c:
+					i->kind == SSA_BLEQ? 0x8e:
+					i->kind == SSA_BGT ? 0x8f:
+					                     0x8d;
+				assert(i[-1].kind == SSA_CMP);
+				dyn_arr_push(&label_relocs, &(idx_pair){ .lo=dyn_arr_size(&ins) + 2, .hi=i->L }, sizeof(idx_pair), a);
+				p = imm32(p, 0);
+				break;
+			case SSA_LABEL:
+				labels[i->to] = dyn_arr_size(&ins);
+				break;
 			case SSA_BOOL:
 				p = store_imm8(p, locals[i->to], i->L);
 				break;
-			case SSA_CMPEQ: case SSA_CMPNEQ: case SSA_CMPLT: case SSA_CMPLEQ: case SSA_CMPGT: case SSA_CMPGEQ:
+			case SSA_CMP:
 				p = load(p, RAX, locals[i->L], 32);
 				p = load(p, RDX, locals[i->R], 32);
 				p = cmp(p, RAX, RDX, 32);
-				p = setcc_mem(p, locals[i->to], i->kind);
 				break;
 			case SSA_BOOL_NEG:
 				p = load(p, RDX, locals[i->R], 8);
 				p = test(p, RDX, RDX, 32);
-				p = setcc_mem(p, locals[i->to], SSA_CMPNEQ);
+				assert(0);
+				// p = setcc_mem(p, locals[i->to], SSA_CMPNEQ);
 				break;
 			case SSA_INT:
 				p = mov_imm32(p, RAX, i[1].v);
@@ -206,7 +214,7 @@ static idx_t gen_symbol(gen_sym *dst, ssa_sym *src, allocator *a)
 			case SSA_CALL:
 				{
 				*p++ = 0xe8;
-				idx_t offset = ins.end - ins.buf.addr + 1;
+				idx_t offset = dyn_arr_size(&ins) + 1;
 				idx_pair r = { .lo=offset, .hi=locals[i->L] };
 				dyn_arr_push(&refs, &r, sizeof r, a);
 				p = imm32(p, 0);
@@ -240,8 +248,16 @@ static idx_t gen_symbol(gen_sym *dst, ssa_sym *src, allocator *a)
 		assert(p-buf < (ptrdiff_t)sizeof buf);
 		dyn_arr_push(&ins, buf, p - buf, a);
 	}
+
+	byte *base = ins.buf.addr;
+	for (idx_pair *reloc = label_relocs.buf.addr, *end = label_relocs.end;
+			reloc != end; reloc++) {
+		base[reloc->lo] = labels[reloc->hi] - reloc->lo - 4;
+	}
 	
+	dyn_arr_fini(&label_relocs, a);
 	DEALLOC(a, temp_alloc);
+	DEALLOC(a, ta2);
 	dst->ins = scratch_from(&ins, a, a);
 	dst->refs = scratch_from(&refs, a, a);
 	return scratch_len(dst->ins);

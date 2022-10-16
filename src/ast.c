@@ -230,6 +230,17 @@ err:
 	return t;
 }
 
+stmt_block parse_stmt_block(allocator *up)
+{
+	dyn_arr body;
+	dyn_arr_init(&body, 0*sizeof(stmt*), ast.temps);
+	if (token_expect('{')) while (!token_match('}')) {
+		stmt *s = parse_stmt(up);
+		dyn_arr_push(&body, &s, sizeof (stmt*), ast.temps);
+	}
+	return scratch_from(&body, ast.temps, up);
+}
+
 stmt *parse_stmt(allocator *up)
 {
 	stmt *s = ALLOC(up, sizeof *s, 8).addr;
@@ -237,6 +248,13 @@ stmt *parse_stmt(allocator *up)
 		s->kind = STMT_RETURN;
 		s->e = parse_expr(up);
 		if (!token_match(';')) goto err;
+	} else if (token_match_kw(tokens.kw_if)) {
+		s->kind = STMT_IFELSE;
+		token_expect('(');
+		s->ifelse.cond = parse_expr(up);
+		token_expect(')');
+		s->ifelse.s_then = parse_stmt(up);
+		s->ifelse.s_else = token_match_kw(tokens.kw_else)? parse_stmt(up): NULL;
 	} else if (token_is(TOKEN_NAME)) {
 		if (lookahead_is(':')) {
 			s->kind = STMT_DECL;
@@ -251,23 +269,15 @@ stmt *parse_stmt(allocator *up)
 			}
 			if (!token_expect(';')) goto err;
 		}
+	} else if (token_is('{')) {
+		s->kind = STMT_BLOCK;
+		s->blk = parse_stmt_block(up);
 	} else {
 		token_unexpected();
 	err:
 		s->kind = STMT_NONE;
 	}
 	return s;
-}
-
-stmt_block parse_stmt_block(allocator *up)
-{
-	dyn_arr body;
-	dyn_arr_init(&body, 0*sizeof(stmt*), ast.temps);
-	if (token_expect('{')) while (!token_match('}')) {
-		stmt *s = parse_stmt(up);
-		dyn_arr_push(&body, &s, sizeof (stmt*), ast.temps);
-	}
-	return scratch_from(&body, ast.temps, up);
 }
 
 decl_idx parse_decl(allocator *up)
@@ -319,9 +329,7 @@ void test_ast(void)
 	token_init("cr/basic.cr", ast.temps, &perma.base);
 	module_t module = parse_module(&perma.base);
 	scope global;
-	resolve_init(1, gpa);
 	resolve_refs(module, &global, ast.temps, &perma.base);
-	resolve_fini(gpa);
 	type_check(module, &global);
 
 	for (scope *it = scratch_start(global.sub), *end = scratch_end(global.sub);

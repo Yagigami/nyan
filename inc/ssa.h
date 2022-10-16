@@ -19,22 +19,20 @@ enum ssa_opcode
 {
 	SSA_NONE = 0,
 	SSA_INT, // 2 extensions // little endian
-	SSA_ADD,
-	SSA_SUB,
+	SSA_ADD, SSA_SUB,
 	SSA_CALL, // no args for now
 	SSA_GLOBAL_REF, // 1 extension
 	SSA_COPY,
 	SSA_RET,
-	SSA_PROLOGUE,
-	SSA_EPILOGUE,
+	SSA_PROLOGUE, SSA_EPILOGUE,
 	SSA_BOOL, // the value is embedded in the L field
-	SSA_CMPEQ,
-	SSA_CMPNEQ,
-	SSA_CMPLT,
-	SSA_CMPLEQ,
-	SSA_CMPGT,
-	SSA_CMPGEQ,
+	SSA_CMP,
 	SSA_BOOL_NEG,
+	SSA_PHI, // to = phi [L: ext.L] [R: ext.R] // 1 ext
+	SSA_LABEL,
+	SSA_GOTO,
+	// bcc cc, then, else
+	SSA_BEQ, SSA_BNEQ, SSA_BLT, SSA_BLEQ, SSA_BGT, SSA_BGEQ,
 
 	SSA_NUM
 };
@@ -57,10 +55,11 @@ static_assert(sizeof (ssa_instr) == sizeof (ssa_extension), "");
 
 typedef scratch_arr ins_buf; // array of ssa_instr
 typedef struct ssa_sym {
-	ident_t name;
-	idx_t idx;
 	ins_buf ins;
 	scratch_arr locals; // maps ssa_refs -> idx_t size | log2 align | type
+	ident_t name;
+	idx_t idx;
+	ssa_ref labels;
 } ssa_sym;
 
 typedef ssa_extension local_info;

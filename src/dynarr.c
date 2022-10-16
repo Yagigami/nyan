@@ -29,7 +29,7 @@ static void dyn_arr_resize_if_needed(dyn_arr *v, size_t size_after, allocator *a
 
 void *dyn_arr_push(dyn_arr *v, const void *addr, size_t size, allocator *a)
 {
-	dyn_arr_resize_if_needed(v, v->end - v->buf.addr + size, a);
+	dyn_arr_resize_if_needed(v, dyn_arr_size(v) + size, a);
 	void *to = v->end;
 	v->end += size;
 	if (addr && size) memcpy(to, addr, size);

@@ -32,6 +32,8 @@ typedef enum stmt_kind {
 	STMT_EXPR,
 	STMT_ASSIGN,
 	STMT_DECL,
+	STMT_IFELSE,
+	STMT_BLOCK,
 	STMT_RETURN,
 
 	STMT_END = STMT_RETURN
@@ -112,6 +114,8 @@ typedef struct stmt {
 		expr *e;
 		struct { expr *L, *R; } assign;
 		decl_idx d;
+		struct { expr *cond; struct stmt *s_then, *s_else /* may be null */; } ifelse;
+		stmt_block blk;
 	};
 	stmt_kind kind;
 } stmt;

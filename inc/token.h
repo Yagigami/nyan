@@ -63,6 +63,8 @@ extern struct global_token_state {
 		kw_bool,
 		kw_false,
 		kw_true,
+		kw_if,
+		kw_else,
 		kw_return;
 	ident_t placeholder;
 	const char *keywords_begin, *keywords_end;

@@ -74,6 +74,8 @@ int token_init(const char *path, allocator *up, allocator *names)
 		KW(bool);
 		KW(false);
 		KW(true);
+		KW(if);
+		KW(else);
 		KW(return);
 
 		INSERT(placeholder, "<missing>");
@@ -144,6 +146,10 @@ again:
 		next.value = 0;
 		while (isdigit(*at)) next.value = 10*next.value + *at++ - '0';
 		break;
+	case '/':
+		assert(*at++ == '/');
+		while (*at != '\n') at++;
+		/* fallthrough */
 	case '\n': 
 		{
 		source_idx line = at - tokens.base;
