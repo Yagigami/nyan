@@ -31,7 +31,9 @@ enum ssa_opcode
 	// SSA_BOOL_NEG,
 	// SSA_PHI, // to = phi L R
 	// SSA_LABEL,
-	// SSA_GOTO,
+	// if ever arises the need to traverse the cfg,
+	// change the goto/br format slightly to make that possible
+	SSA_GOTO,
 	SSA_BR, // br cc, lhs, rhs, then, else // 1 extension
 
 	SSA_NUM
@@ -59,7 +61,6 @@ static_assert(sizeof (ssa_instr) == sizeof (ssa_extension), "");
 
 typedef struct ir3_node {
 	idx_t begin, end; // ssa_instr indices
-	ssa_ref next1, next2; // up to 2 children // (ssa_ref)-1 sentinel
 } ir3_node;
 
 typedef struct ir3_func {

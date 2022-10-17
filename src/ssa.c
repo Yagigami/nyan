@@ -159,72 +159,68 @@ static void ir3_decl(ir3_func *f, decl_idx i, map_stack *stk, allocator *a)
 
 static void ir3_stmt(ir3_func *f, stmt *s, map_stack *stk, allocator *a)
 {
-	switch (s->kind) {
-		ssa_instr buf[2];
-	case STMT_DECL:
-		ir3_decl(f, s->d, stk, a);
-		break;
-	case STMT_ASSIGN:
-		{
-		ssa_ref R = ir3_expr(f, s->assign.R, stk, a);
-		ssa_ref L = ir3_expr(f, s->assign.L, stk, a);
-		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_COPY, L, R }, sizeof(ssa_instr), a);
-		break;
-		}
-	case STMT_RETURN:
-		{
-		ssa_ref ret = ir3_expr(f, s->e, stk, a);
-		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_RET, ret }, sizeof(ssa_instr), a);
-		break;
-		}
-	case STMT_IFELSE:
-		{
-		ssa_ref cond = ir3_expr(f, s->ifelse.cond, stk, a);
-		ssa_ref check = new_local(&f->locals, linfo_bool, a);
-		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_BOOL, check, 0 }, sizeof(ssa_instr), a);
-		buf[0] = (ssa_instr){ .kind=SSA_BR, SSAB_NE, cond, check };
-		buf[1] = (ssa_instr){ .v = -1 };
-		// the then/else label fields are in the extension
-		ssa_instr *br = dyn_arr_push(&f->ins, buf, 2*sizeof *buf, a) + sizeof(ssa_instr);
-		idx_t br_idx = (void*) br - f->ins.buf.addr;
+switch (s->kind) {
+	ssa_instr buf[2];
+case STMT_DECL:
+	ir3_decl(f, s->d, stk, a);
+	break;
+case STMT_ASSIGN:
+	{
+	ssa_ref R = ir3_expr(f, s->assign.R, stk, a);
+	ssa_ref L = ir3_expr(f, s->assign.L, stk, a);
+	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_COPY, L, R }, sizeof(ssa_instr), a);
+	break;
+	}
+case STMT_RETURN:
+	{
+	ssa_ref ret = ir3_expr(f, s->e, stk, a);
+	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_RET, ret }, sizeof(ssa_instr), a);
+	break;
+	}
+case STMT_IFELSE:
+	{
+	ssa_ref cond = ir3_expr(f, s->ifelse.cond, stk, a);
+	ssa_ref check = new_local(&f->locals, linfo_bool, a);
+	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_BOOL, check, 0 }, sizeof(ssa_instr), a);
+	buf[0] = (ssa_instr){ .kind=SSA_BR, SSAB_NE, cond, check };
+	buf[1] = (ssa_instr){ .v = -1 };
+	// the then/else label fields are in the extension
+	ssa_instr *br = dyn_arr_push(&f->ins, buf, 2*sizeof *buf, a) + sizeof(ssa_instr);
+	idx_t br_idx = (void*) br - f->ins.buf.addr;
+	br->L = dyn_arr_size(&f->nodes)/sizeof(ir3_node);
 
-		br->L = dyn_arr_size(&f->nodes)/sizeof(ir3_node);
-		ir3_node *then_n = dyn_arr_push(&f->nodes, NULL, sizeof *then_n, a);
-		idx_t then_idx = (void*) then_n - f->nodes.buf.addr;
-		ir3_node *pre_n  = then_n - 1;
-		idx_t pre_idx = (void*) pre_n - f->nodes.buf.addr;
-		then_n->begin = pre_n->end = dyn_arr_size(&f->ins);
-		assert(pre_n->next1 == 0xff);
-		pre_n->next1 = then_n - (ir3_node*)f->nodes.buf.addr;
-		then_n->next1 = then_n->next2 = -1;
-		ir3_stmt(f, s->ifelse.s_then, stk, a);
+	ir3_node *then_n = dyn_arr_push(&f->nodes, NULL, sizeof *then_n, a);
+	then_n->begin = then_n[-1].end = dyn_arr_size(&f->ins);
+	ir3_stmt(f, s->ifelse.s_then, stk, a);
+	buf[0].kind = SSA_GOTO;
+	ssa_instr *then_i = dyn_arr_push(&f->ins, buf, sizeof *buf, a);
+	idx_t then_i_idx = (void*) then_i - f->ins.buf.addr;
 
-		ir3_node *else_n;
-		idx_t else_idx;
-		assert(s->ifelse.s_else);
-		if (s->ifelse.s_else) {
-			br = f->ins.buf.addr + br_idx;
-			br->R = dyn_arr_size(&f->nodes)/sizeof(ir3_node);
-			else_n = dyn_arr_push(&f->nodes, NULL, sizeof *else_n, a);
-			else_idx = (void*) else_n - f->nodes.buf.addr;
-			else_n->next1 = else_n->next2 = -1;
-			else_n[-1].end = else_n->begin = dyn_arr_size(&f->ins);
-			pre_n = f->nodes.buf.addr + pre_idx;
-			pre_n->next2 = else_n - (ir3_node*)f->nodes.buf.addr;
-			ir3_stmt(f, s->ifelse.s_else, stk, a);
-		}
+	ssa_instr *else_i;
+	idx_t else_i_idx;
+	if (s->ifelse.s_else) {
+		br = f->ins.buf.addr + br_idx;
+		br->R = dyn_arr_size(&f->nodes)/sizeof(ir3_node);
+		ir3_node *else_n = dyn_arr_push(&f->nodes, NULL, sizeof *else_n, a);
+		else_n[-1].end = else_n->begin = dyn_arr_size(&f->ins);
+		ir3_stmt(f, s->ifelse.s_else, stk, a);
+		else_i = dyn_arr_push(&f->ins, buf, sizeof *buf, a);
+		else_i_idx = (void*) else_i - f->ins.buf.addr;
+	}
 
-		ir3_node *post_n = dyn_arr_push(&f->nodes, NULL, sizeof *post_n, a);
-		post_n->next1 = post_n->next2 = -1;
-		then_n = f->nodes.buf.addr + then_idx;
-		then_n->next1 = post_n - (ir3_node*) f->nodes.buf.addr;
-		else_n = f->nodes.buf.addr + else_idx;
-		else_n->next1 = post_n - (ir3_node*) f->nodes.buf.addr;
-		post_n[-1].end = post_n->begin = dyn_arr_size(&f->ins);
-		break;
-		}
-	default:
-		__builtin_unreachable();
+	ir3_node *post_n = dyn_arr_push(&f->nodes, NULL, sizeof *post_n, a);
+	ssa_ref label = post_n - (ir3_node*) f->nodes.buf.addr;
+	then_i = f->ins.buf.addr + then_i_idx;
+	then_i->to = label;
+	if (s->ifelse.s_else) {
+		else_i = f->ins.buf.addr + else_i_idx;
+		else_i->to = label;
+	}
+	post_n[-1].end = post_n->begin = dyn_arr_size(&f->ins);
+	break;
+	}
+default:
+	__builtin_unreachable();
 	}
 }
 
@@ -234,7 +230,6 @@ static void ir3_decl_func(ir3_func *f, decl *d, map_stack *stk, allocator *a)
 	dyn_arr_init(&f->nodes, 0, a);
 	ir3_node *first = dyn_arr_push(&f->nodes, NULL, sizeof *first, a);
 	first->begin = 0; // end will be set by the next time something is pushed, and one last time at the end
-	first->next1 = first->next2 = -1;
 	dyn_arr_init(&f->locals, 0, a);
 	map_init(&stk->ast2num, 2, a);
 	for (stmt **iter = scratch_start(d->func_d.body), **end = scratch_end(d->func_d.body); iter != end; iter++) {

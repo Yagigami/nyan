@@ -2,9 +2,15 @@ other func() : int32
 {
 	a :int32 = 8;
 	if (true)
-		a = a - 2;
+		if (true)
+			a = 0;
+		else
+			a = 4;
 	else
-		a = a + 3;
+		if (false)
+			a = 3;
+		else
+			a = 0;
 	return a;
 }
 

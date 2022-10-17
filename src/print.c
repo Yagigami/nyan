@@ -68,6 +68,7 @@ static int fprint_ir3_instr(FILE *to, ssa_instr *i, int *extra_offset)
 		return fprintf(to, "br %s, %%%hhx, %%%hhx, L%hhx, L%hhx\n", opc2s[i->to], i->L, i->R, i[1].L, i[1].R);
 	case SSA_PROLOGUE: return fprintf(to, "enter\n");
 	case SSA_RET: return fprintf(to, "ret %%%hhx\n", i->to);
+	case SSA_GOTO: return fprintf(to, "goto L%hhx\n", i->to);
 	case SSA_COPY: return fprintf(to, "%%%hhx = %%%hhx\n", i->to, i->L);
 	case SSA_BOOL: return fprintf(to, "%%%hhx = %db\n", i->to, i->L);
 	case SSA_CALL: return fprintf(to, "%%%hhx = call %%%hhx\n", i->to, i->L);
@@ -90,7 +91,7 @@ static int fprint_spaces(FILE *to, int num)
 static int fprint_ir3_node(FILE *to, const ir3_func *f, const ir3_node *node, ptrdiff_t idx)
 {
 	int indent = 3;
-	int printed = fprintf(to, "L%tx -> L%hhx, L%hhx:\n", idx, node->next1, node->next2);
+	int printed = fprintf(to, "L%tx:\n", idx);
 	for (idx_t i = node->begin; i < node->end; i += sizeof(ssa_instr)) {
 		ssa_instr *instr = f->ins.buf.addr + i;
 		int extra = 0;
