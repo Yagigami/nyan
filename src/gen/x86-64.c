@@ -36,8 +36,13 @@ static byte *load(byte *p, enum x86_64_reg to, idx_t offset, int bits)
 	if (bits == 16) *p++ = OP_SIZE_OVERRIDE;
 	if (bits == 64 || to >= R8) *p++ = rex(bits==64, to>>3, 0, 0);
 	*p++ = opcode;
-	*p++ = modrm(2, RBP, to);
-	return imm32(p, offset);
+	if (-0x80 <= offset && offset < 0x80) {
+		*p++ = modrm(1, RBP, to);
+		return imm8(p, offset);
+	} else {
+		*p++ = modrm(2, RBP, to);
+		return imm32(p, offset);
+	}
 }
 
 static byte *store(byte *p, enum x86_64_reg from, idx_t offset, int bits)
@@ -46,8 +51,13 @@ static byte *store(byte *p, enum x86_64_reg from, idx_t offset, int bits)
 	if (bits == 16) *p++ = OP_SIZE_OVERRIDE;
 	if (bits == 64 || from >= R8) *p++ = rex(bits==64, from>>3, 0, 0);
 	*p++ = opcode;
-	*p++ = modrm(2, RBP, from);
-	return imm32(p, offset);
+	if (-0x80 <= offset && offset < 0x80) {
+		*p++ = modrm(1, RBP, from);
+		return imm8(p, offset);
+	} else {
+		*p++ = modrm(2, RBP, from);
+		return imm32(p, offset);
+	}
 }
 
 static byte *addsub(byte *p, enum x86_64_reg L, enum x86_64_reg R, enum ssa_opcode opc, int bits)
@@ -59,13 +69,19 @@ static byte *addsub(byte *p, enum x86_64_reg L, enum x86_64_reg R, enum ssa_opco
 	return p;
 }
 
-static byte *addsubimm32(byte *p, enum x86_64_reg r, idx_t imm, enum ssa_opcode opc, int bits)
+static byte *addsubimm(byte *p, enum x86_64_reg r, idx_t imm, enum ssa_opcode opc, int bits)
 {
 	byte opcode_ext = opc == SSA_ADD? 0: opc == SSA_SUB? 5: -1;
 	if (bits == 64 || r >= R8) *p++ = rex(bits==64, 0, 0, r>>3);
-	*p++ = 0x81;
-	*p++ = modrm(3, r, opcode_ext);
-	return imm32(p, imm);
+	if (-0x80 <= imm && imm < 0x80) {
+		*p++ = 0x83;
+		*p++ = modrm(3, r, opcode_ext);
+		return imm8(p, imm);
+	} else {
+		*p++ = 0x81;
+		*p++ = modrm(3, r, opcode_ext);
+		return imm32(p, imm);
+	}
 }
 
 static byte *push64(byte *p, enum x86_64_reg r)
@@ -103,8 +119,13 @@ static byte *mov_imm32(byte *p, enum x86_64_reg r, idx_t imm)
 static byte *store_imm8(byte *p, idx_t offset, idx_t imm)
 {
 	*p++ = 0xc6;
-	*p++ = modrm(2, RBP, 0);
-	return imm8(imm32(p, offset), imm);
+	if (-0x80 <= offset && offset < 0x80) {
+		*p++ = modrm(1, RBP, 0);
+		return imm8(imm8(p, offset), imm);
+	} else {
+		*p++ = modrm(2, RBP, 0);
+		return imm8(imm32(p, offset), imm);
+	}
 }
 
 #define ALIGN(N,A) (((N)+(A)-1)/(A)*(A))
@@ -171,13 +192,13 @@ static idx_t gen_symbol(gen_sym *dst, ssa_sym *src, allocator *a)
 				p = imm32(p, 0);
 				break;
 			case SSA_BEQ: case SSA_BNEQ: case SSA_BLT: case SSA_BLEQ: case SSA_BGT: case SSA_BGEQ:
+				// TODO: the jump instr shouldnt depend on the cmp instr before.
+				// which is supposed to be used for boolean comparisons
+				// instead this case block should be the one generating a cmp + jcc
 				*p++ = 0x0f;
-				*p++ = i->kind == SSA_BEQ ? 0x84:
-					i->kind == SSA_BNEQ? 0x85:
-					i->kind == SSA_BLT ? 0x8c:
-					i->kind == SSA_BLEQ? 0x8e:
-					i->kind == SSA_BGT ? 0x8f:
-					                     0x8d;
+				*p++ =  i->kind == SSA_BEQ ? 0x84: i->kind == SSA_BNEQ? 0x85:
+					i->kind == SSA_BLT ? 0x8c: i->kind == SSA_BLEQ? 0x8e:
+					i->kind == SSA_BGT ? 0x8f: 0x8d;
 				assert(i[-1].kind == SSA_CMP);
 				dyn_arr_push(&label_relocs, &(idx_pair){ .lo=dyn_arr_size(&ins) + 2, .hi=i->L }, sizeof(idx_pair), a);
 				p = imm32(p, 0);
@@ -231,14 +252,14 @@ static idx_t gen_symbol(gen_sym *dst, ssa_sym *src, allocator *a)
 				break;
 			case SSA_RET:
 				p = load(p, RAX, locals[i->to], 32);
-				p = addsubimm32(p, RSP, stack_space, SSA_ADD, 64);
+				p = addsubimm(p, RSP, stack_space, SSA_ADD, 64);
 				p = pop64(p, RBP);
 				*p++ = 0xc3;
 				break;
 			case SSA_PROLOGUE:
-				p = endbr64(p);
+				// p = endbr64(p);
 				p = push64(p, RBP);
-				p = addsubimm32(p, RSP, stack_space, SSA_SUB, 64);
+				p = addsubimm(p, RSP, stack_space, SSA_SUB, 64);
 				p = mov(p, RBP, RSP, 64);
 				break;
 			default:

@@ -36,7 +36,7 @@ test: $(OUT)/$(TEST)
 
 dump: $(OUT)/$(TEST)
 	$<
-	objdump -Dwr --insn-width=12 basic.o
+	objdump -Dwr -Mintel --insn-width=6 basic.o
 	ld rt.o basic.o
 	./a.out
 

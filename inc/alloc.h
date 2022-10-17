@@ -32,7 +32,7 @@ int allocator_arena_init(allocator_arena *a, allocation m);
 void allocator_arena_fini(allocator_arena *a);
 
 extern allocator system_allocator;
-extern allocator malloc_allocator; // general-purpose
+extern const allocator malloc_allocator; // general-purpose
 
 typedef struct allocator_geom {
 	allocator base;

@@ -86,7 +86,7 @@ void allocator_free(allocator *a, allocation m)
 	free(m.addr);
 }
 
-allocator malloc_allocator = {
+const allocator malloc_allocator = {
 	.alloc   = allocator_malloc,
 	.realloc = allocator_realloc,
 	.dealloc = allocator_free,

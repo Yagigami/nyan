@@ -8,7 +8,7 @@ cap func(): int32
 
 uses_bool func(): int32
 {
-	// a : bool = true;
+	a : bool = true;
 	b : int = 8 + 0;
 	// c : bool = b == cap();
 	// d : bool = !(9 < b);
@@ -50,6 +50,8 @@ main func(): int32
 {
 	a : int32 = 1;
 	a = 2;
+	b : bool = true;
+	c : bool = false;
 	a = 3;
 	return a;
 }
@@ -93,7 +95,7 @@ bar func() : int32
 simple func(): int32
 {
 	simple : int32 = 0;
-	if (1 == 9) {
+	if (true) {
 	        simple = 1;
 	} else {
 	        simple = 2;

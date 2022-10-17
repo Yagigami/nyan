@@ -154,7 +154,7 @@ void type_check_decl(decl_idx i, scope *sc, scope_stack_l *stk)
 		type = type_check_expr(d->var_d.init, stk, RVALUE);
 		expect_or(same_type(d->type, type),
 				d->pos, "initializer type does not match target type.\n");
-		assert(!same_type(type, &type_bool) && "not implemented");
+		// assert(!same_type(type, &type_bool) && "not implemented");
 		break;
 	case DECL_FUNC:
 		assert(d->type->kind == TYPE_FUNC);

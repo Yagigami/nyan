@@ -228,11 +228,12 @@ size_t string_hash(key_t k)
 
 size_t intern_hash(key_t k)
 {
+	size_t h = k;
 	for (int i=0; i<4; i++) {
-		k ^= 0xd7ea8d188bbe10L;
-		k *= 0x030bdbe1678abdL;
+		h ^= 0xd7ea8d188bbe10L;
+		h *= 0x030bdbe1678abdL;
 	}
-	return k;
+	return h;
 }
 
 static int _string_cmp(key_t L, key_t R)

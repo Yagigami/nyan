@@ -142,9 +142,10 @@ static void conv3ac_decl(decl_idx i, dyn_arr *ins, dyn_arr *locals, local_stack 
 	switch (d->kind) {
 	case DECL_VAR:
 		{
+		ssa_ref init = conv3ac_expr(d->var_d.init, ins, locals, stk, a);
 		map_entry *entry = map_add(&stk->locals, d->name, intern_hash, a);
 		entry->k = d->name;
-		entry->v = conv3ac_expr(d->var_d.init, ins, locals, stk, a);
+		entry->v = init;
 		}
 		break;
 	case DECL_FUNC:
@@ -212,14 +213,23 @@ static ssa_ref conv3ac_stmt(stmt *s, dyn_arr *ins, dyn_arr *locals, scope **nest
 	case STMT_IFELSE:
 		{
 		ssa_ref cond = conv3ac_expr(s->ifelse.cond, ins, locals, stk, a);
-		assert(s->ifelse.cond->kind == EXPR_BINARY);
 		// FIXME: right now, if/else all need to create new scopes to produce correct results
 		// fix this mess
 		assert(s->ifelse.s_then->kind == STMT_BLOCK && (!s->ifelse.s_else || s->ifelse.s_else->kind == STMT_BLOCK));
-		int tk = s->ifelse.cond->binary.op;
-		int cc = tk == TOKEN_EQ ? SSA_BEQ : tk == TOKEN_NEQ? SSA_BNEQ:
-			 tk == '<'      ? SSA_BLT : tk == TOKEN_LEQ? SSA_BLEQ:
-			 tk == '>'      ? SSA_BGT : tk == TOKEN_GEQ? SSA_BGEQ: (assert(0), -1);
+		int cc;
+		if (s->ifelse.cond->kind == EXPR_BINARY) {
+			int tk = s->ifelse.cond->binary.op;
+			cc = 	tk == TOKEN_EQ ? SSA_BEQ : tk == TOKEN_NEQ? SSA_BNEQ:
+				tk == '<'      ? SSA_BLT : tk == TOKEN_LEQ? SSA_BLEQ:
+				tk == '>'      ? SSA_BGT : tk == TOKEN_GEQ? SSA_BGEQ: (assert(0), -1);
+		} else {
+			cc = SSA_BNEQ;
+			ssa_ref nz = dyn_arr_size(locals) / sizeof(local_info);
+			dyn_arr_push(locals, &(local_info){ ssa_linfo(1, 1, SSAT_BOOL) }, sizeof(local_info), a);
+			dyn_arr_push(ins, &(ssa_instr){ .kind=SSA_BOOL, nz, 0 }, sizeof(ssa_instr), a);
+			// TODO: remove
+			dyn_arr_push(ins, &(ssa_instr){ .kind=SSA_CMP, cond, nz }, sizeof(ssa_instr), a);
+		}
 
 		ssa_ref l_pre = labels, l_then = ++*label_alloc, l_else = ++*label_alloc, l_post = ++*label_alloc;
 		dyn_arr_push(ins, &(ssa_instr){ .kind=cc, cond , l_then, l_else }, sizeof(ssa_instr), a);
@@ -360,6 +370,7 @@ static ins_buf pass_2ac(ins_buf src, allocator *a)
 		case SSA_CALL:
 		case SSA_CMP:
 		case SSA_COPY:
+		case SSA_BOOL:
 			// nop
 			dyn_arr_push(&dst, it, sizeof *it, a);
 			goto set_local;
@@ -385,7 +396,6 @@ static ins_buf pass_2ac(ins_buf src, allocator *a)
 			dyn_arr_push(&patch, &(patch_me){ set[it->R], it->to, it->R }, sizeof(patch_me), a);
 			it++;
 			goto set_local;
-		case SSA_BOOL:
 		case SSA_BOOL_NEG:
 		default:
 			assert(0);
