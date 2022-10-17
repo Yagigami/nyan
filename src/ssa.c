@@ -12,24 +12,17 @@
 
 #include <assert.h>
 #include <stdbool.h>
-// TODO: remove
-#include <string.h>
-#include <stdlib.h>
 
 #define LINFO_TYPE 5
 #define LINFO_ALIGN 3
 #define LINFO_SIZE 24
 
-
-static const ssa_kind tok2ssa[TOKEN_NUM] = {
-	['!'] = SSA_BOOL_NEG,
-	['+'] = SSA_ADD, ['-'] = SSA_SUB,
-	[TOKEN_EQ] = SSA_CMP, [TOKEN_NEQ] = SSA_CMP,
-	['<'] = SSA_CMP, [TOKEN_LEQ] = SSA_CMP,
-	['>'] = SSA_CMP, [TOKEN_GEQ] = SSA_CMP,
-};
-
 static int _string_cmp2(key_t L, key_t R) { return L - R; }
+
+#define LINFO(size,log2a,type) ((type)|(log2a)<<LINFO_TYPE|(size)<<(LINFO_TYPE+LINFO_ALIGN))
+#define LINFO_GET_SIZE(linfo) ((linfo)>>(LINFO_TYPE+LINFO_ALIGN))
+#define LINFO_GET_ALIGN(linfo) (1<<(((linfo)>>LINFO_TYPE)&((1<<LINFO_ALIGN)-1)))
+#define LINFO_GET_TYPE(linfo) ((linfo)&((1<<LINFO_TYPE)-1))
 
 local_info ssa_linfo(idx_t size, size_t align, enum ssa_type type)
 {
@@ -40,418 +33,167 @@ local_info ssa_linfo(idx_t size, size_t align, enum ssa_type type)
 			      align ==  4? 2: align ==  8? 3:
 			      align == 16? 4: align == 32? 5:
 			      align == 64? 6: align ==128? 7: (assert(0), 0);
-	return type | log2_align << LINFO_TYPE | size << (LINFO_TYPE+LINFO_ALIGN);
+	return LINFO(size, log2_align, type);
 }
 
-idx_t ssa_lsize(local_info l) { return l >> (LINFO_TYPE+LINFO_ALIGN); } 
-size_t ssa_lalign(local_info l) { return 1 << ((l >> LINFO_TYPE) & ((1 << LINFO_ALIGN) - 1)); } 
-enum ssa_type ssa_ltype(local_info l) { return l & ((1 << LINFO_TYPE) - 1); }
+static const local_info linfo_int32 = LINFO(4, 2, SSAT_INT32);
+static const local_info linfo_bool  = LINFO(1, 0, SSAT_BOOL );
+static const local_info linfo_unk   = LINFO(0, 0, SSAT_NONE );
 
-typedef struct mutated {
-	ident_t name;
-	map *in;
-	ssa_ref from, to;
-} mutated;
-
-typedef struct local_stack {
-	map locals;
-	mutated *mut; // if not mutated, the name is 0
+typedef struct map_stack {
+	map ast2num;
 	scope *scope;
-	struct local_stack *next;
-	idx_t mut_len;
-} local_stack;
+	struct map_stack *next;
+} map_stack;
 
-static ssa_ref conv3ac_expr(expr *e, dyn_arr *ins, dyn_arr *locals, local_stack *stk, allocator *a)
+static ssa_ref new_local(dyn_arr *locals, local_info linfo, allocator *a)
 {
-	// ahhh, wouldnt it be nice to just be able to write *p++ = ins{ .op=... }
-	idx_t len = dyn_arr_size(locals) / sizeof(local_info);
+	ssa_ref num = dyn_arr_size(locals)/sizeof linfo;
+	dyn_arr_push(locals, &linfo, sizeof linfo, a);
+	return num;
+}
+
+static ssa_ref ir3_expr(ir3_func *f, expr *e, map_stack *stk, allocator *a)
+{
 	switch (e->kind) {
-		ssa_instr buf[3]; // close enough?
+		ssa_ref number;
 	case EXPR_INT:
-		// allocate before recursing. or could be after, just need to be consistent
-		dyn_arr_push(locals, &(local_info){ ssa_linfo(4, 4, SSAT_INT32) }, sizeof(local_info), a);
-		buf[0] = (ssa_instr){ .kind=SSA_INT, .to=len };
-		buf[1] = (ssa_instr){ .v = e->value & ((1LU<<32) - 1) };
-		buf[2] = (ssa_instr){ .v = e->value >> 32 };
-		assert(sizeof (ssa_extension) == sizeof (uint32_t) && "adapt this a bit");
-		dyn_arr_push(ins, buf, 3*sizeof *buf, a);
-		return buf[0].to;
-	case EXPR_BOOL:
-		dyn_arr_push(locals, &(local_info){ ssa_linfo(1, 1, SSAT_BOOL) }, sizeof(local_info), a);
-		buf[0] = (ssa_instr){ .kind=SSA_BOOL, .to=len, .L=e->name == tokens.kw_true };
-		assert((buf[0].L & ~1) == 0);
-		dyn_arr_push(ins, buf, sizeof *buf, a);
-		return buf[0].to;
+		number = new_local(&f->locals, linfo_int32, a);
+		assert(e->value <= (ssa_extension)-1);
+		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_IMM, number }, sizeof(ssa_instr), a);
+		// just little endian things
+		dyn_arr_push(&f->ins, &e->value, sizeof(ssa_extension), a);
+		return number;
 	case EXPR_NAME:
 		{
-		map_entry *entry = map_find(&stk->locals, e->name, intern_hash(e->name), _string_cmp2);
-		local_stack *it = stk;
-		while (!entry) {
+		ident_t name = e->name;
+		size_t h = intern_hash(name);
+		map_entry *ent = map_find(&stk->ast2num, name, h, _string_cmp2);
+		map_stack *it = stk;
+		while (!ent) {
 			it = it->next;
-			assert(it);
-			entry = map_find(&it->locals, e->name, intern_hash(e->name), _string_cmp2);
+			assert(stk);
+			ent = map_find(&it->ast2num, name, h, _string_cmp2);
 		}
-		if (!it->next) { // it is the bottom of the stack -> it is a global
-			map_entry *insert = map_add(&stk->locals, e->name, intern_hash, a);
-			insert->k = entry->k;
-			dyn_arr_push(locals, &(local_info){ ssa_linfo(0, 1, SSAT_NONE) }, sizeof(local_info), a);
-			insert->v = len;
-			buf[0] = (ssa_instr){ .kind=SSA_GLOBAL_REF, .to=len };
-			buf[1] = (ssa_instr){ .v=entry->v };
-			dyn_arr_push(ins, buf, 2*sizeof *buf, a);
-			entry = insert;
+		if (!it->next) { // this is a global scope reference -> it gets referenced in a local
+			number = new_local(&f->locals, linfo_int32, a);
+			map_entry *corresponding = map_find(&it->scope->refs, name, h, _string_cmp2); assert(corresponding);
+			ssa_ref index = corresponding->v;
+			dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_GLOBAL_REF, number, index }, sizeof(ssa_instr), a);
+			ent = map_add(&stk->ast2num, name, intern_hash, a);
+			ent->k = name;
+			ent->v = number;
 		}
-		return entry->v;
+		return ent->v;
+		}
+	case EXPR_CALL:
+		{
+		ssa_ref func = ir3_expr(f, e->call.operand, stk, a);
+		number = new_local(&f->locals, linfo_int32, a);
+		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_CALL, number, func }, sizeof(ssa_instr), a);
+		return number;
 		}
 	case EXPR_BINARY:
 		{
-		// FIXME: clean up
-		local_info i = e->binary.op == '+' || e->binary.op == '-'? ssa_linfo(4, 4, SSAT_INT32): ssa_linfo(1, 1, SSAT_BOOL);
-		dyn_arr_push(locals, &i, sizeof i, a);
-		buf[0].kind = tok2ssa[e->binary.op];
-		buf[0].L = conv3ac_expr(e->binary.L, ins, locals, stk, a);
-		buf[0].R = conv3ac_expr(e->binary.R, ins, locals, stk, a);
-		buf[0].to = len;
-		dyn_arr_push(ins, &buf[0], sizeof buf[0], a);
-		return buf[0].to;
+		ssa_ref L = ir3_expr(f, e->binary.L, stk, a);
+		ssa_ref R = ir3_expr(f, e->binary.R, stk, a);
+		number = new_local(&f->locals, linfo_int32, a);
+		token_kind op = e->binary.op;
+		enum ssa_opcode opc = 	op == '+' ? SSA_ADD:
+					op == '-' ? SSA_SUB:
+					(assert(0), -1);
+		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=opc, number, L, R }, sizeof(ssa_instr), a);
+		return number;
 		}
-	case EXPR_UNARY:
-		// FIXME: clean up
-		dyn_arr_push(locals, &(local_info){ ssa_linfo(1, 1, SSAT_BOOL) }, sizeof(local_info), a);
-		buf[0].kind = tok2ssa[e->unary.op];
-		buf[0].L = conv3ac_expr(e->unary.operand, ins, locals, stk, a);
-		buf[0].to = len;
-		dyn_arr_push(ins, &buf[0], sizeof *buf, a);
-		return buf[0].to;
-	case EXPR_CALL:
-		// FIXME: clean up
-		dyn_arr_push(locals, &(local_info){ ssa_linfo(4, 4, SSAT_INT32) }, sizeof(local_info), a);
-		buf[0].kind = SSA_CALL;
-		buf[0].L = conv3ac_expr(e->call.operand, ins, locals, stk, a);
-		buf[0].to = len;
-		dyn_arr_push(ins, &buf[0], sizeof buf[0], a);
-		return buf[0].to;
 	default:
-		assert(0);
+		__builtin_unreachable();
 	}
 }
 
-static void conv3ac_decl(decl_idx i, dyn_arr *ins, dyn_arr *locals, local_stack *stk, allocator *a)
+static void ir3_decl(ir3_func *f, decl_idx i, map_stack *stk, allocator *a)
 {
 	decl *d = idx2decl(i);
 	switch (d->kind) {
 	case DECL_VAR:
 		{
-		ssa_ref init = conv3ac_expr(d->var_d.init, ins, locals, stk, a);
-		map_entry *entry = map_add(&stk->locals, d->name, intern_hash, a);
-		entry->k = d->name;
-		entry->v = init;
+		ssa_ref val = ir3_expr(f, d->var_d.init, stk, a);
+		assert(!map_find(&stk->ast2num, d->name, intern_hash(d->name), _string_cmp2));
+		map_entry *e = map_add(&stk->ast2num, d->name, intern_hash, a);
+		e->k = d->name;
+		ssa_ref number = dyn_arr_size(&f->locals)/sizeof(local_info);
+		dyn_arr_push(&f->locals, &linfo_int32, sizeof linfo_int32, a);
+		e->v = number;
+		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_COPY, number, val }, sizeof(ssa_instr), a);
 		}
 		break;
-	case DECL_FUNC:
-		// should be handled in `conv3ac_func`
 	default:
-		assert(0);
+		__builtin_unreachable();
 	}
 }
 
-// TODO: clean this
-// SO MANY PARAMTERSSSSSS
-// * use a struct for ins, locals
-// * having a stack PLUS mut/mut_len makes no sense
-// * the label situation is also a mess
-static ssa_ref conv3ac_stmt_block(stmt_block blk, dyn_arr *ins, dyn_arr *locals, scope *nested, local_stack *stk, allocator *a, ssa_ref labels, ssa_ref *label_alloc, mutated *mut, idx_t mut_len);
-
-// the scope* param is only for nested scopes to look at.
-// name lookup for decls/exprs is solely done through stk
-static ssa_ref conv3ac_stmt(stmt *s, dyn_arr *ins, dyn_arr *locals, scope **nested, local_stack *stk, allocator *a, ssa_ref labels, ssa_ref *label_alloc, mutated *mut, idx_t mut_len)
+static void ir3_stmt(ir3_func *f, stmt *s, map_stack *stk, allocator *a)
 {
 	switch (s->kind) {
-		ssa_instr buf[2];
 	case STMT_DECL:
-		conv3ac_decl(s->d, ins, locals, stk, a);
-		break;
-	case STMT_EXPR:
-		conv3ac_expr(s->e, ins, locals, stk, a);
+		ir3_decl(f, s->d, stk, a);
 		break;
 	case STMT_ASSIGN:
 		{
-		ssa_ref R = conv3ac_expr(s->assign.R, ins, locals, stk, a);
-		assert(s->assign.L->kind == EXPR_NAME);
-		ident_t name = s->assign.L->name;
-		size_t h = intern_hash(name);
-		local_stack *it = stk;
-		map_entry *entry = map_find(&it->locals, name, h, _string_cmp2);
-		while (!entry) {
-			it = it->next; assert(it);
-			entry = map_find(&it->locals, name, h, _string_cmp2);
-		}
-		bool inserted;
-		map_entry *insert = map_id(&stk->locals, name, intern_hash, _string_cmp2, &inserted, a);
-		if (it != stk) assert(inserted);
-		// FIXME: this is a hack, normally L should just be R and there should be no COPY
-		// instruction in the SSA form, this can be corrected after the phi-removal is correct
-		ssa_ref L = insert->v = dyn_arr_size(locals) / sizeof(ssa_instr);
-		// FIXME: type
-		dyn_arr_push(locals, &(local_info){ ssa_linfo(4, 4, SSAT_INT32) }, sizeof(local_info), a);
-		dyn_arr_push(ins, &(ssa_instr){ .kind=SSA_COPY, L, R }, sizeof(ssa_instr), a);
-		if (!stk->mut) // this may be NULL if we are mutating a value at function scope: no outer scope cares
-			assert(!it->next->next);
-		else if (entry->v < stk->mut_len)
-			stk->mut[entry->v] = (mutated){ .name=name, .from=entry->v, .to=insert->v, .in=&it->locals };
-		}
+		ssa_ref R = ir3_expr(f, s->assign.R, stk, a);
+		ssa_ref L = ir3_expr(f, s->assign.L, stk, a);
+		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_COPY, L, R }, sizeof(ssa_instr), a);
 		break;
+		}
 	case STMT_RETURN:
 		{
-		ssa_ref r = conv3ac_expr(s->e, ins, locals, stk, a);
-		buf[0] = (ssa_instr){ .kind=SSA_RET, r };
-		dyn_arr_push(ins, buf, sizeof *buf, a);
-		}
+		ssa_ref ret = ir3_expr(f, s->e, stk, a);
+		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_RET, ret }, sizeof(ssa_instr), a);
 		break;
-	case STMT_BLOCK:
-		return conv3ac_stmt_block(s->blk, ins, locals, (*nested)++, stk, a, labels, label_alloc, mut, mut_len);
-	case STMT_IFELSE:
-		{
-		ssa_ref cond = conv3ac_expr(s->ifelse.cond, ins, locals, stk, a);
-		// FIXME: right now, if/else all need to create new scopes to produce correct results
-		// fix this mess
-		assert(s->ifelse.s_then->kind == STMT_BLOCK && (!s->ifelse.s_else || s->ifelse.s_else->kind == STMT_BLOCK));
-		int cc;
-		if (s->ifelse.cond->kind == EXPR_BINARY) {
-			int tk = s->ifelse.cond->binary.op;
-			cc = 	tk == TOKEN_EQ ? SSA_BEQ : tk == TOKEN_NEQ? SSA_BNEQ:
-				tk == '<'      ? SSA_BLT : tk == TOKEN_LEQ? SSA_BLEQ:
-				tk == '>'      ? SSA_BGT : tk == TOKEN_GEQ? SSA_BGEQ: (assert(0), -1);
-		} else {
-			cc = SSA_BNEQ;
-			ssa_ref nz = dyn_arr_size(locals) / sizeof(local_info);
-			dyn_arr_push(locals, &(local_info){ ssa_linfo(1, 1, SSAT_BOOL) }, sizeof(local_info), a);
-			dyn_arr_push(ins, &(ssa_instr){ .kind=SSA_BOOL, nz, 0 }, sizeof(ssa_instr), a);
-			// TODO: remove
-			dyn_arr_push(ins, &(ssa_instr){ .kind=SSA_CMP, cond, nz }, sizeof(ssa_instr), a);
-		}
-
-		ssa_ref l_pre = labels, l_then = ++*label_alloc, l_else = ++*label_alloc, l_post = ++*label_alloc;
-		dyn_arr_push(ins, &(ssa_instr){ .kind=cc, cond , l_then, l_else }, sizeof(ssa_instr), a);
-		dyn_arr_push(ins, &(ssa_instr){ .kind=SSA_LABEL, l_then }, sizeof(ssa_instr), a);
-		idx_t len = dyn_arr_size(locals) / sizeof(local_info);
-		allocation temp_alloc = ALLOC(a, len * 2 * sizeof(mutated), 8); // 1 for then, 1 for else
-		memset(temp_alloc.addr, 0, temp_alloc.size);
-		mutated *then_mut = temp_alloc.addr, *else_mut = temp_alloc.addr + len * sizeof(mutated);
-		conv3ac_stmt(s->ifelse.s_then, ins, locals, nested, stk, a, l_pre, label_alloc, then_mut, len);
-		dyn_arr_push(ins, &(ssa_instr){ .kind=SSA_GOTO , l_post }, sizeof(ssa_instr), a);
-		dyn_arr_push(ins, &(ssa_instr){ .kind=SSA_LABEL, l_else }, sizeof(ssa_instr), a);
-		if (s->ifelse.s_else)
-			conv3ac_stmt(s->ifelse.s_else, ins, locals, nested, stk, a, l_pre, label_alloc, else_mut, len);
-		// dyn_arr_push(ins, &(ssa_instr){ .kind=SSA_GOTO , l_post }, sizeof(ssa_instr), a);
-		dyn_arr_push(ins, &(ssa_instr){ .kind=SSA_LABEL, l_post }, sizeof(ssa_instr), a);
-
-		for (idx_t i = 0; i < len; i++) {
-			mutated *in_then = then_mut + i, *in_else = else_mut + i;
-			if (!in_then->name && !in_else->name) {
-				continue;
-			}
-			ssa_ref dest = dyn_arr_size(locals) / sizeof(local_info);
-			// TODO: bool exists
-			local_info linfo = ssa_linfo(4, 4, SSAT_INT32);
-			dyn_arr_push(locals, &linfo, sizeof linfo, a);
-			mutated *m = in_then->name ? in_then: in_else;
-			if (!in_else->name) {
-				assert(in_then->from == i);
-				buf[0] = (ssa_instr){ .kind=SSA_PHI, dest, in_then->from, in_then->to };
-				buf[1] = (ssa_instr){ .L=l_pre, .R=l_then };
-			} else if (!in_then->name) {
-				assert(in_else->from == i);
-				buf[0] = (ssa_instr){ .kind=SSA_PHI, dest, in_else->from, in_else->to };
-				buf[1] = (ssa_instr){ .L=l_pre, .R=l_else };
-			} else {
-				assert(in_then->from == i);
-				assert(in_else->from == i);
-				buf[0] = (ssa_instr){ .kind=SSA_PHI, dest, in_then->to, in_else->to };
-				buf[1] = (ssa_instr){ .L=l_then, .R=l_else };
-			}
-			dyn_arr_push(ins, buf, 2*sizeof *buf, a);
-			if (m->from < stk->mut_len)
-				stk->mut[m->from] = (mutated){ .name=m->name, m->in, m->from, dest };
-			map_entry *e = map_find(m->in, m->name, intern_hash(m->name), _string_cmp2); assert(e);
-			e->v = dest;
-		}
-		DEALLOC(a, temp_alloc);
-
-		return l_post;
 		}
 	default:
-		assert(0);
+		__builtin_unreachable();
 	}
-	return labels;
 }
 
-ssa_ref conv3ac_stmt_block(stmt_block blk, dyn_arr *ins, dyn_arr *locals, scope *link, local_stack *stk, allocator *a, ssa_ref labels, ssa_ref *label_alloc, mutated *mut, idx_t mut_len)
+static void ir3_decl_func(ir3_func *f, decl *d, map_stack *stk, allocator *a)
 {
-	local_stack top = { .scope=link, .next=stk };
-	map_init(&top.locals, 2, a);
-	scope *sub = scratch_start(link->sub);
-	top.mut = mut; // cannot be embedded in the stack here because it needs to be accessed after the stmt_block call returns
-	top.mut_len = mut_len;
-	for (stmt **it = scratch_start(blk), **end = scratch_end(blk); it != end; it++) {
-		labels = conv3ac_stmt(*it, ins, locals, &sub, &top, a, labels, label_alloc, mut, mut_len);
+	dyn_arr_init(&f->ins, 0, a);
+	dyn_arr_init(&f->nodes, 0, a);
+	ir3_node *first = dyn_arr_push(&f->nodes, NULL, sizeof *first, a);
+	first->begin = 0; // end will be set by the next time something is pushed, and one last time at the end
+	first->next1 = first->next2 = -1;
+	dyn_arr_init(&f->locals, 0, a);
+	map_init(&stk->ast2num, 2, a);
+	for (stmt **iter = scratch_start(d->func_d.body), **end = scratch_end(d->func_d.body); iter != end; iter++) {
+		assert(iter[0]->kind != STMT_BLOCK);
+		assert(iter[0]->kind != STMT_IFELSE);
+		ir3_stmt(f, *iter, stk, a);
 	}
-	map_fini(&top.locals, a);
-	return *label_alloc;
+	ir3_node *last = f->nodes.end - sizeof *last;
+	last->end = dyn_arr_size(&f->ins);
+	map_fini(&stk->ast2num, a);
 }
 
-static void conv3ac_func(decl *d, ssa_sym *to, scope *link, local_stack *stk, allocator *a)
+ir3_module convert_to_3ac(module_t ast, scope *enclosing, allocator *a)
 {
-	dyn_arr ins, locals;
-	dyn_arr_init(&ins, 0*sizeof(ssa_instr), a);
-	dyn_arr_init(&locals, 0*sizeof(local_info), a);
-	dyn_arr_push(&ins, &(ssa_instr){ .kind=SSA_PROLOGUE }, sizeof(ssa_instr), a);
-	dyn_arr_push(&ins, &(ssa_instr){ .kind=SSA_LABEL, .to=0 }, sizeof(ssa_instr), a);
-	to->labels = 0;
-	conv3ac_stmt_block(d->func_d.body, &ins, &locals, link, stk, a, 0, &to->labels, NULL, 0);
-	to->ins = scratch_from(&ins, a, a);
-	to->locals = scratch_from(&locals, a, a);
-	to->name = d->name;
-}
-
-ssa_module convert_to_3ac(module_t module, scope *sc, allocator *a)
-{
-	dyn_arr defs;
-	dyn_arr_init(&defs, 0*sizeof(ssa_sym), a);
-	scope *scope_it = scratch_start(sc->sub);
-	local_stack stk = { .scope=sc, .next=NULL };
-	map_init(&stk.locals, 2, a);
-	decl_idx *decl_start = scratch_start(module), *decl_end = scratch_end(module), *decl_it = decl_start ;
-	for (; decl_it != decl_end; decl_it++, scope_it++) {
-		decl *d = idx2decl(*decl_it);
+	dyn_arr funcs;
+	dyn_arr_init(&funcs, 0, a);
+	map_stack bottom = { .scope=enclosing, .next=NULL };
+	map_init(&bottom.ast2num, 2, a);
+	scope *fsc = scratch_start(enclosing->sub);
+	for (decl_idx *start = scratch_start(ast), *end = scratch_end(ast),
+			*iter = start; iter != end; iter++, fsc++) {
+		decl *d = idx2decl(*iter);
 		assert(d->kind == DECL_FUNC);
-		ssa_sym *sym = dyn_arr_push(&defs, NULL, sizeof(ssa_sym), a);
-		map_entry *e = map_add(&stk.locals, d->name, intern_hash, a);
+		map_entry *e = map_add(&bottom.ast2num, d->name, intern_hash, a);
 		e->k = d->name;
-		sym->idx = e->v = decl_it - decl_start;
-		conv3ac_func(d, sym, scope_it, &stk, a);
+		e->v = iter-start;
+		map_stack func_scope = { .scope=fsc, .next=&bottom };
+		ir3_decl_func(dyn_arr_push(&funcs, NULL, sizeof(ir3_func), a),
+				d, &func_scope, a);
 	}
-	map_fini(&stk.locals, a);
-	return scratch_from(&defs, a, a);
-}
-
-typedef struct patch_me { idx_t src_idx; ssa_ref to, from; } patch_me;
-static int patch_me_cmp(const void *L_, const void *R_)
-{
-	const patch_me *L = L_, *R = R_;
-	return L->src_idx - R->src_idx;
-}
-
-static const enum ssa_opcode invert_cc[SSA_BGEQ - SSA_BEQ + 1] = {
-	[SSA_BEQ - SSA_BEQ] = SSA_BNEQ, [SSA_BNEQ - SSA_BEQ] = SSA_BEQ,
-	[SSA_BLT - SSA_BEQ] = SSA_BGEQ, [SSA_BLEQ - SSA_BEQ] = SSA_BGT,
-	[SSA_BGT - SSA_BEQ] = SSA_BLEQ, [SSA_BGEQ - SSA_BEQ] = SSA_BLT,
-};
-
-static ssa_ref global_num_locals;
-static ins_buf pass_2ac(ins_buf src, allocator *a)
-{
-	dyn_arr dst;
-	dyn_arr_init(&dst, 0*sizeof(ssa_instr), a);
-	allocation aset = ALLOC(a, global_num_locals * sizeof(idx_t), 4);
-	idx_t *set = aset.addr;
-	dyn_arr patch;
-	dyn_arr_init(&patch, 0*sizeof(patch_me), a);
-	ssa_ref idx;
-	for (ssa_instr *it = scratch_start(src), *end = scratch_end(src);
-			it != end; it++) switch (idx = it->to, it->kind) {
-		ssa_instr buf[2];
-		case SSA_INT:
-			dyn_arr_push(&dst, it, sizeof *it, a), it++;
-			/* fallthrough */
-		case SSA_GLOBAL_REF:
-			dyn_arr_push(&dst, it, sizeof *it, a), it++;
-			/* fallthrough */
-		case SSA_CALL:
-		case SSA_CMP:
-		case SSA_COPY:
-		case SSA_BOOL:
-			// nop
-			dyn_arr_push(&dst, it, sizeof *it, a);
-			goto set_local;
-		case SSA_ADD:
-		case SSA_SUB:
-			// a = add b, c => a = b; a = add a c
-			buf[0] = (ssa_instr){ .kind=SSA_COPY, .to=it->to, .L=it->L };
-			buf[1] = (ssa_instr){ .kind=it->kind, .to=it->to, .L=it->to, .R = it->R };
-			dyn_arr_push(&dst, buf, 2*sizeof *buf, a);
-			goto set_local;
-		case SSA_GOTO: case SSA_LABEL:
-		case SSA_PROLOGUE:
-		case SSA_RET:
-			dyn_arr_push(&dst, it, sizeof *it, a);
-			continue;
-		case SSA_BEQ: case SSA_BNEQ: case SSA_BLT: case SSA_BLEQ: case SSA_BGT: case SSA_BGEQ:
-			buf[0] = (ssa_instr){ .kind=invert_cc[it->kind - SSA_BEQ], it->to, it->R }; // .R loses meaning now
-			// buf[1] = (ssa_instr){ .kind=SSA_GOTO, .to=it->R };
-			dyn_arr_push(&dst, buf, 1*sizeof *buf, a);
-			continue;
-		case SSA_PHI:
-			dyn_arr_push(&patch, &(patch_me){ set[it->L], it->to, it->L }, sizeof(patch_me), a);
-			dyn_arr_push(&patch, &(patch_me){ set[it->R], it->to, it->R }, sizeof(patch_me), a);
-			it++;
-			goto set_local;
-		case SSA_BOOL_NEG:
-		default:
-			assert(0);
-		set_local:
-			set[idx] = dyn_arr_size(&dst);
-			continue;
-	}
-	idx_t num_patch = dyn_arr_size(&patch) / sizeof(patch_me);
-	if (num_patch == 0) return DEALLOC(a, aset), scratch_from(&dst, a, a);
-
-	// FIXME: incorrect: need to insert at the end of the referenced label (hear `offset = label(ref+1)-1`)
-	// for now I bypass this issue *i think* by making sure instr->to is always defined inside of the right label
-	// but if the code that is fed in this optimizes the copies out, this will not work
-
-	// FIXME: yeah this size is stupid -> change api a bit
-	idx_t num_phi = num_patch / 2;
-	dyn_arr second_pass;
-	dyn_arr_init(&second_pass, dyn_arr_size(&dst) + (num_patch - num_phi) * sizeof (ssa_instr), a);
-	qsort(patch.buf.addr, num_patch, sizeof(patch_me), patch_me_cmp);
-	idx_t at = 0;
-	for (patch_me *p = patch.buf.addr, *end = patch.end; p != end; p++) {
-		for (idx_t src_idx = at; src_idx < p->src_idx; src_idx += sizeof(ssa_instr)) {
-			ssa_instr *i = dst.buf.addr + src_idx;
-			// TODO: maybe store the phi indices in the first pass
-			// and use them to avoid decoding in the second pass
-			if (i->kind == SSA_PHI) continue;
-			dyn_arr_push(&second_pass, dst.buf.addr + src_idx, sizeof(ssa_instr), a);
-			if (i->kind != SSA_INT && i->kind != SSA_GLOBAL_REF) continue;
-			src_idx += sizeof(ssa_instr);
-			dyn_arr_push(&second_pass, dst.buf.addr + src_idx, sizeof(ssa_instr), a);
-			if (i->kind != SSA_INT) continue;
-			src_idx += sizeof(ssa_instr);
-			dyn_arr_push(&second_pass, dst.buf.addr + src_idx, sizeof(ssa_instr), a);
-		}
-		dyn_arr_push(&second_pass, &(ssa_instr){ .kind=SSA_COPY, p->to, p->from }, sizeof(ssa_instr), a);
-		at = p->src_idx;
-	}
-	for (idx_t src_idx = at; src_idx < (idx_t)dyn_arr_size(&dst); src_idx += sizeof(ssa_instr))
-		dyn_arr_push(&second_pass, dst.buf.addr + src_idx, sizeof(ssa_instr), a);
-	dyn_arr_fini(&dst, a);
-	dyn_arr_fini(&patch, a);
-	DEALLOC(a, aset);
-	return scratch_from(&second_pass, a, a);
-}
-
-void ssa_run_pass(ssa_module mod, ssa_pass pass, allocator *a)
-{
-	for (ssa_sym *sym = scratch_start(mod), *end = scratch_end(mod);
-			sym != end; sym++) {
-		// TODO: remove
-		global_num_locals = scratch_len(sym->locals) / sizeof(local_info);
-
-		ins_buf next = pass(sym->ins, a);
-		scratch_fini(sym->ins, a);
-		sym->ins = next;
-	}
+	map_fini(&bottom.ast2num, a);
+	return scratch_from(&funcs, a, a);
 }
 
 void test_3ac(void)
@@ -459,13 +201,13 @@ void test_3ac(void)
 	extern int printf(const char *, ...);
 	printf("==3AC==\n");
 
-	allocator *gpa = &malloc_allocator;
+	allocator *gpa = (allocator*)&malloc_allocator;
 	ast_init(gpa);
 
 	allocator_geom perma;
 	allocator_geom_init(&perma, 16, 8, 0x100, gpa);
 
-	token_init("cr/basic.cr", ast.temps, &perma.base);
+	token_init("cr/simpler.cr", ast.temps, &perma.base);
 
 	allocator_geom just_ast;
 	allocator_geom_init(&just_ast, 10, 8, 0x100, gpa);
@@ -477,35 +219,10 @@ void test_3ac(void)
 	token_fini();
 
 	if (!ast.errors) {
-		ssa_module ssa_3ac = convert_to_3ac(module, &global, gpa);
+		ir3_module m3ac = convert_to_3ac(module, &global, gpa);
 		scope_fini(&global, ast.temps);
 		allocator_geom_fini(&just_ast);
 		ast_fini(gpa);
-
-		print(stdout, "SSA form:\n");
-		dump_3ac(ssa_3ac);
-
-		ssa_run_pass(ssa_3ac, pass_2ac, gpa);
-		print(stdout, "2-address code:\n");
-		dump_3ac(ssa_3ac);
-
-		gen_module g = gen_x86_64(ssa_3ac, gpa);
-		int e = elf_object_from(&g, "basic.o", gpa);
-		assert(!e);
-
-		for (gen_sym *sym = scratch_start(g.syms), *end = scratch_end(g.syms);
-				sym != end; sym++) {
-			scratch_fini(sym->ins, gpa);
-			scratch_fini(sym->refs, gpa);
-		}
-		scratch_fini(g.syms, gpa);
-
-		for (ssa_sym *sym = scratch_start(ssa_3ac), *end = scratch_end(ssa_3ac);
-				sym != end; sym++) {
-			scratch_fini(sym->ins, gpa);
-			scratch_fini(sym->locals, gpa);
-		}
-		scratch_fini(ssa_3ac, gpa);
 	}
 
 	// FIXME: right now i need to free those after the object file is generated.
@@ -513,14 +230,5 @@ void test_3ac(void)
 	// preserved.
 	map_fini(&tokens.idents, tokens.up);
 	allocator_geom_fini(&perma);
-}
-
-int dump_3ac(ssa_module module)
-{
-	int prn = 0;
-	for (ssa_sym *it = scratch_start(module), *end = scratch_end(module);
-			it != end; it++)
-		prn += print(stdout, *it);
-	return prn;
 }
 

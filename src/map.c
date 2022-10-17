@@ -106,7 +106,7 @@ static key_t test_insert(key_t k);
 void test_map(void)
 {
 	map m;
-	allocator *up = &malloc_allocator;
+	allocator *up = (allocator*)&malloc_allocator;
 	int e = map_init(&m, 2, up);
 	assert(e == 0);
 	bool inserted;
@@ -160,7 +160,7 @@ key_t test_insert(key_t k)
 {
 	const char *src = (char*) k;
 	size_t len = strlen(src);
-	allocation m = ALLOC(&malloc_allocator, len+1, 1);
+	allocation m = ALLOC((allocator*)&malloc_allocator, len+1, 1);
 	memcpy(m.addr, src, len+1);
 	return (uintptr_t) m.addr;
 }

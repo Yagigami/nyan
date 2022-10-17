@@ -14,25 +14,25 @@
 typedef uint8_t ssa_ref;
 typedef uint8_t ssa_kind;
 typedef uint32_t ssa_extension;
+typedef uint32_t local_info;
 
 enum ssa_opcode
 {
 	SSA_NONE = 0,
-	SSA_INT, // 2 extensions // little endian
+	SSA_IMM, // 1 extension // little endian
 	SSA_ADD, SSA_SUB,
 	SSA_CALL, // no args for now
-	SSA_GLOBAL_REF, // 1 extension
+	SSA_GLOBAL_REF,
 	SSA_COPY,
 	SSA_RET,
 	SSA_PROLOGUE,
-	SSA_BOOL, // the value is embedded in the L field
-	SSA_CMP,
-	SSA_BOOL_NEG,
-	SSA_PHI, // to = phi [L: ext.L] [R: ext.R] // 1 ext
-	SSA_LABEL,
-	SSA_GOTO,
+	// SSA_BOOL, // the value is embedded in the L field
+	// SSA_BOOL_NEG,
+	// SSA_PHI, // to = phi L R
+	// SSA_LABEL,
+	// SSA_GOTO,
 	// bcc cc, then, else
-	SSA_BEQ, SSA_BNEQ, SSA_BLT, SSA_BLEQ, SSA_BGT, SSA_BGEQ,
+	// SSA_BEQ, SSA_BNEQ, SSA_BLT, SSA_BLEQ, SSA_BGT, SSA_BGEQ,
 
 	SSA_NUM
 };
@@ -53,28 +53,19 @@ typedef union ssa_instr {
 } ssa_instr;
 static_assert(sizeof (ssa_instr) == sizeof (ssa_extension), "");
 
-typedef scratch_arr ins_buf; // array of ssa_instr
-typedef struct ssa_sym {
-	ins_buf ins;
-	scratch_arr locals; // maps ssa_refs -> idx_t size | log2 align | type
-	ident_t name;
-	idx_t idx;
-	ssa_ref labels;
-} ssa_sym;
+typedef struct ir3_node {
+	idx_t begin, end; // ssa_instr indices
+	ssa_ref next1, next2; // up to 2 children // (ssa_ref)-1 sentinel
+} ir3_node;
 
-typedef ssa_extension local_info;
-local_info ssa_linfo(idx_t size, size_t align, enum ssa_type type);
-idx_t ssa_lsize(local_info l);
-size_t ssa_lalign(local_info l);
-enum ssa_type ssa_ltype(local_info l);
+typedef struct ir3_func {
+	dyn_arr ins; // ssa_instr
+	dyn_arr nodes;
+	dyn_arr locals; // names are replaced by numbers, but variables can be mutated
+} ir3_func;
 
-typedef scratch_arr ssa_module; // array of ssa_sym
-ssa_module convert_to_3ac(module_t module, scope *sc, allocator *a);
-
-typedef ins_buf (*ssa_pass)(ins_buf src, allocator *a);
-void ssa_run_pass(ssa_module mod, ssa_pass pass, allocator *a);
-
-int dump_3ac(ssa_module module);
+typedef scratch_arr ir3_module;
+ir3_module convert_to_3ac(module_t ast, scope *enclosing, allocator *a);
 
 #endif /* CROUTE_SSA_H */
 

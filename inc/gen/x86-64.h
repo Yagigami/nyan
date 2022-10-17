@@ -25,7 +25,5 @@ typedef struct gen_module {
 	idx_t num_refs;
 } gen_module;
 
-gen_module gen_x86_64(ssa_module m2ac, allocator *a);
-
 #endif /* CROUTE_GEN_X86_64_H */
 

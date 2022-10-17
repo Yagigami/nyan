@@ -130,6 +130,7 @@ static byte *store_imm8(byte *p, idx_t offset, idx_t imm)
 
 #define ALIGN(N,A) (((N)+(A)-1)/(A)*(A))
 
+#if 0
 idx_t *gen_lalloc(scratch_arr locals, idx_t *out_stack_space, allocation *to_free, allocator *a)
 {
 	idx_t num_locals = scratch_len(locals) / sizeof(local_info);
@@ -151,6 +152,7 @@ idx_t *gen_lalloc(scratch_arr locals, idx_t *out_stack_space, allocation *to_fre
 	*to_free = temp_alloc;
 	return local_offsets;
 }
+#endif
 
 static byte *cmp(byte *p, enum x86_64_reg L, enum x86_64_reg R, int bits)
 {
@@ -168,6 +170,7 @@ static byte *test(byte *p, enum x86_64_reg L, enum x86_64_reg R, int bits)
 	return p;
 }
 
+#if 0
 static idx_t gen_symbol(gen_sym *dst, ssa_sym *src, allocator *a)
 {
 	dst->name = src->name;
@@ -180,7 +183,7 @@ static idx_t gen_symbol(gen_sym *dst, ssa_sym *src, allocator *a)
 	allocation temp_alloc, ta2 = ALLOC(a, (src->labels+1) * sizeof(idx_t), 4);
 	idx_t *labels = ta2.addr;
 	idx_t stack_space;
-	idx_t *locals = gen_lalloc(src->locals, &stack_space, &temp_alloc, a);
+	idx_t *locals = NULL; //gen_lalloc(src->locals, &stack_space, &temp_alloc, a);
 
 	for (ssa_instr *start = scratch_start(src->ins), *end = scratch_end(src->ins),
 			*i = start; i != end; i++) {
@@ -282,7 +285,9 @@ static idx_t gen_symbol(gen_sym *dst, ssa_sym *src, allocator *a)
 	dst->refs = scratch_from(&refs, a, a);
 	return scratch_len(dst->ins);
 }
+#endif
 
+#if 0
 gen_module gen_x86_64(ssa_module m2ac, allocator *a)
 {
 	gen_module out;
@@ -300,4 +305,5 @@ gen_module gen_x86_64(ssa_module m2ac, allocator *a)
 	out.syms = scratch_from(&dest, a, a);
 	return out;
 }
+#endif
 

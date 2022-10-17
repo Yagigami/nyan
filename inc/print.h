@@ -38,7 +38,6 @@ static_assert(P_END < (1<<PRINTABLE_SHIFT), "increase PRINTABLE_SHIFT");
 			char* /* JUST C THINGS LOL */: P_STRING, \
 			ident_t : P_KEYWORD, \
 			source_idx : P_SOURCE_LINE, \
-			ssa_sym : P_3ACSYM, \
 			token : P_TOKEN, \
 			token_kind : P_TOKEN_KIND \
 			))

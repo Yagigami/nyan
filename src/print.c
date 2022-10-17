@@ -56,6 +56,7 @@ static int fprint_source_line(FILE *to, source_idx offset)
 	return fprintf(to, "%s:%d:%.*s\n", tokens.cpath, line, len, start);
 }
 
+#if 0
 static int fprint_3acinstr(FILE *to, ssa_instr *i, int *extra_offset)
 {
 	static const char *opc2s[SSA_BGEQ-SSA_BEQ+1] = { "beq", "bne", "blt", "ble", "bgt", "bge" };
@@ -82,7 +83,6 @@ static int fprint_3acinstr(FILE *to, ssa_instr *i, int *extra_offset)
 	case SSA_BOOL_NEG: return fprintf(to, "%%%hhx = bool_neg %%%hhx\n", i->to, i->L);
 	case SSA_ADD: return fprintf(to, "%%%hhx = add %%%hhx, %%%hhx\n", i->to, i->L, i->R);
 	case SSA_SUB: return fprintf(to, "%%%hhx = sub %%%hhx, %%%hhx\n", i->to, i->L, i->R);
-	case SSA_CMP: return fprintf(to, "%%%hhx = cmp %%%hhx, %%%hhx\n", i->to, i->L, i->R);
 	case SSA_LABEL: return fprintf(to, "L%hhx:\n", i->to);
 	case SSA_GOTO: return fprintf(to, "goto L%hhx\n", i->to);
 	case SSA_BEQ: case SSA_BNEQ: case SSA_BLT: case SSA_BLEQ: case SSA_BGT: case SSA_BGEQ:
@@ -113,6 +113,7 @@ static int fprint_3acsym(FILE *to, ssa_sym sym)
 	}
 	return prn + fprintf(to, "\n");
 }
+#endif
 
 int _print_impl(FILE *to, uint64_t bitmap, ...)
 {
@@ -136,9 +137,6 @@ int _print_impl(FILE *to, uint64_t bitmap, ...)
 		break;
 	case P_SOURCE_LINE:
 		printed += fprint_source_line(to, va_arg(args, source_idx));
-		break;
-	case P_3ACSYM:
-		printed += fprint_3acsym(to, va_arg(args, ssa_sym));
 		break;
 	default:
 		__builtin_unreachable();
