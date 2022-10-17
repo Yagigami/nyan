@@ -26,8 +26,8 @@ enum ssa_opcode
 	SSA_COPY,
 	SSA_RET,
 	SSA_PROLOGUE,
-	SSA_SETEQ, SSA_SETNE, SSA_SETLT, SSA_SETLE, SSA_SETGT, SSA_SETGE,
 	SSA_BOOL, // the value is embedded in the L field
+	SSA_SET,
 	// SSA_BOOL_NEG,
 	// SSA_PHI, // to = phi L R
 	// SSA_LABEL,

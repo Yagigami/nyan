@@ -9,7 +9,7 @@ cap func(): int32
 uses_bool func(): int32
 {
 	a : bool = true;
-	b : int = 8 + 0;
+	b : int32 = 8 + 0;
 	// c : bool = b == cap();
 	// d : bool = !(9 < b);
 	if (b == 9) {
@@ -101,5 +101,25 @@ simple func(): int32
 	        simple = 2;
 	}
 	return simple;
+}
+
+scope func(): int32
+{
+	scope : int32 = 1;
+	if (1 == scope) {
+		scope : int32 = 2;
+		scope = 3;
+	} else {
+		scope = 4;
+	}
+	return scope;
+}
+
+scope2 func(): int32
+{
+	if (false) {
+		return scope2();
+	}
+	return 4;
 }
 

@@ -60,17 +60,20 @@ static int fprint_ir3_instr(FILE *to, ssa_instr *i, int *extra_offset)
 {
 	static const char *opc2s[SSAB_GE-SSAB_EQ+1] = { "eq", "ne", "lt", "le", "gt", "ge" };
 	switch (i->kind) {
+	case SSA_SET:
+		*extra_offset = sizeof *i;
+		return fprintf(to, "set(%s) %%%hhx, %%%hhx, %%%hhx\n", opc2s[i->to-SSAB_EQ], i[1].to, i->L, i->R);
 	case SSA_IMM:
 		*extra_offset = sizeof *i;
 		return fprintf(to, "%%%hhx = #%x\n", i->to, i[1].v);
 	case SSA_BR:
 		*extra_offset = sizeof *i;
-		return fprintf(to, "br %s, %%%hhx, %%%hhx, L%hhx, L%hhx\n", opc2s[i->to], i->L, i->R, i[1].L, i[1].R);
+		return fprintf(to, "br(%s) %%%hhx, %%%hhx, L%hhx, L%hhx\n", opc2s[i->to], i->L, i->R, i[1].L, i[1].R);
 	case SSA_PROLOGUE: return fprintf(to, "enter\n");
 	case SSA_RET: return fprintf(to, "ret %%%hhx\n", i->to);
 	case SSA_GOTO: return fprintf(to, "goto L%hhx\n", i->to);
-	case SSA_COPY: return fprintf(to, "%%%hhx = %%%hhx\n", i->to, i->L);
 	case SSA_BOOL: return fprintf(to, "%%%hhx = %db\n", i->to, i->L);
+	case SSA_COPY: return fprintf(to, "%%%hhx = %%%hhx\n", i->to, i->L);
 	case SSA_CALL: return fprintf(to, "%%%hhx = call %%%hhx\n", i->to, i->L);
 	case SSA_GLOBAL_REF: return fprintf(to, "%%%hhx = GLOBAL.%x\n", i->to, i->L);
 	case SSA_ADD: return fprintf(to, "%%%hhx = add %%%hhx, %%%hhx\n", i->to, i->L, i->R);

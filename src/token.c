@@ -38,6 +38,8 @@ static const enum {
 	['>']      = TOKEN_EQ, [TOKEN_GEQ] = TOKEN_EQ,
 };
 
+static bool isident(char c) { return isdigit(c) || isalpha(c) || c == '_'; }
+
 static ident_t intern_string(source_idx start, size_t len);
 static bool ident_in_range(ident_t chk, const void *L, const void *R);
 
@@ -128,7 +130,7 @@ again:
 		break;
 	case 'A' ... 'Z': case 'a' ... 'z': case '_':
 		next.kind = TOKEN_NAME;
-		while (isalpha(*at) || isdigit(*at) || *at == '_') at++;
+		while (isident(*at)) at++;
 		if (at-start > IDENT_MAX_LEN) {
 			next.kind = TOKEN_ERR_LONG_NAME;
 			break;
@@ -202,7 +204,7 @@ void test_token(void)
 {
 	printf("==TOKEN==\n");
 	allocator_geom names;
-	allocator *gpa = &malloc_allocator;
+	allocator *gpa = (allocator*)&malloc_allocator;
 	allocator_geom_init(&names, 8, 8, 0x10, gpa);
 	int e = token_init("cr/basic.cr", gpa, &names.base);
 	assert(e == 0);
@@ -221,7 +223,7 @@ void test_token(void)
 size_t string_hash(key_t k)
 {
 	size_t h = 0x23be1793daa2779fUL;
-	for (const char *c = (char*) k; isalpha(*c); c++)
+	for (const char *c = (char*) k; isident(*c); c++)
 		h = h*15 ^ (*c * h);
 	return h;
 }
@@ -239,12 +241,12 @@ size_t intern_hash(key_t k)
 static int _string_cmp(key_t L, key_t R)
 {
 	const char *lc=ident_str(L), *rc=ident_str(R);
-	for (; isalpha(*lc) && isalpha(*rc); lc++, rc++) {
+	for (; isident(*lc) && isident(*rc); lc++, rc++) {
 		if (*lc != *rc) return *lc - *rc;
 	}
 	// just need a `==` or `!=` test, so the result
 	// doesnt have to give an ordering
-	if (!isalpha(*lc) && !isalpha(*rc))
+	if (!isident(*lc) && !isident(*rc))
 		return 0;
 	return 1;
 }

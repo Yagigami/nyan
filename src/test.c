@@ -6,7 +6,7 @@ extern void test_3ac(void);
 
 int main(void)
 {
-	test_token();
+	// test_token();
 	test_map();
 	test_ast();
 	test_3ac();
