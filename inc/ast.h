@@ -47,7 +47,8 @@ typedef enum expr_kind {
 	EXPR_BOOL,
 	EXPR_NAME,
 	EXPR_CALL,
-	EXPR_BINARY,
+	EXPR_ADD,
+	EXPR_CMP,
 	EXPR_UNARY,
 } expr_kind;
 

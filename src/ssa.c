@@ -64,6 +64,11 @@ static ssa_ref ir3_expr(ir3_func *f, expr *e, map_stack *stk, allocator *a)
 		// just little endian things
 		dyn_arr_push(&f->ins, &e->value, sizeof(ssa_extension), a);
 		return number;
+	case EXPR_BOOL:
+		number = new_local(&f->locals, linfo_bool, a);
+		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_BOOL, number, e->name == tokens.kw_true }, sizeof(ssa_instr), a);
+		return number;
+		
 	case EXPR_NAME:
 		{
 		ident_t name = e->name;
@@ -86,6 +91,7 @@ static ssa_ref ir3_expr(ir3_func *f, expr *e, map_stack *stk, allocator *a)
 		}
 		return ent->v;
 		}
+
 	case EXPR_CALL:
 		{
 		ssa_ref func = ir3_expr(f, e->call.operand, stk, a);
@@ -93,7 +99,8 @@ static ssa_ref ir3_expr(ir3_func *f, expr *e, map_stack *stk, allocator *a)
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_CALL, number, func }, sizeof(ssa_instr), a);
 		return number;
 		}
-	case EXPR_BINARY:
+
+	case EXPR_ADD:
 		{
 		ssa_ref L = ir3_expr(f, e->binary.L, stk, a);
 		ssa_ref R = ir3_expr(f, e->binary.R, stk, a);
@@ -105,6 +112,24 @@ static ssa_ref ir3_expr(ir3_func *f, expr *e, map_stack *stk, allocator *a)
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=opc, number, L, R }, sizeof(ssa_instr), a);
 		return number;
 		}
+
+	case EXPR_CMP:
+		{
+		ssa_ref L = ir3_expr(f, e->binary.L, stk, a);
+		ssa_ref R = ir3_expr(f, e->binary.R, stk, a);
+		number = new_local(&f->locals, linfo_bool, a);
+		token_kind op = e->binary.op;
+		enum ssa_opcode opc =	op == TOKEN_EQ ? SSA_SETEQ:
+					op == TOKEN_NEQ? SSA_SETNE:
+					op == '<'      ? SSA_SETLT:
+					op == TOKEN_LEQ? SSA_SETLE:
+					op == '>'      ? SSA_SETGT:
+					op == TOKEN_GEQ? SSA_SETGE:
+					(assert(0), -1);
+		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=opc, number, L, R }, sizeof(ssa_instr), a);
+		return number;
+		}
+
 	default:
 		__builtin_unreachable();
 	}
@@ -121,7 +146,8 @@ static void ir3_decl(ir3_func *f, decl_idx i, map_stack *stk, allocator *a)
 		map_entry *e = map_add(&stk->ast2num, d->name, intern_hash, a);
 		e->k = d->name;
 		ssa_ref number = dyn_arr_size(&f->locals)/sizeof(local_info);
-		dyn_arr_push(&f->locals, &linfo_int32, sizeof linfo_int32, a);
+		dyn_arr_push(&f->locals, d->type->name == tokens.kw_int32?
+				&linfo_int32: &linfo_bool, sizeof linfo_int32, a);
 		e->v = number;
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_COPY, number, val }, sizeof(ssa_instr), a);
 		}
@@ -134,6 +160,7 @@ static void ir3_decl(ir3_func *f, decl_idx i, map_stack *stk, allocator *a)
 static void ir3_stmt(ir3_func *f, stmt *s, map_stack *stk, allocator *a)
 {
 	switch (s->kind) {
+		ssa_instr buf[2];
 	case STMT_DECL:
 		ir3_decl(f, s->d, stk, a);
 		break;
@@ -148,6 +175,52 @@ static void ir3_stmt(ir3_func *f, stmt *s, map_stack *stk, allocator *a)
 		{
 		ssa_ref ret = ir3_expr(f, s->e, stk, a);
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_RET, ret }, sizeof(ssa_instr), a);
+		break;
+		}
+	case STMT_IFELSE:
+		{
+		ssa_ref cond = ir3_expr(f, s->ifelse.cond, stk, a);
+		ssa_ref check = new_local(&f->locals, linfo_bool, a);
+		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_BOOL, check, 0 }, sizeof(ssa_instr), a);
+		buf[0] = (ssa_instr){ .kind=SSA_BR, SSAB_NE, cond, check };
+		buf[1] = (ssa_instr){ .v = -1 };
+		// the then/else label fields are in the extension
+		ssa_instr *br = dyn_arr_push(&f->ins, buf, 2*sizeof *buf, a) + sizeof(ssa_instr);
+		idx_t br_idx = (void*) br - f->ins.buf.addr;
+
+		br->L = dyn_arr_size(&f->nodes)/sizeof(ir3_node);
+		ir3_node *then_n = dyn_arr_push(&f->nodes, NULL, sizeof *then_n, a);
+		idx_t then_idx = (void*) then_n - f->nodes.buf.addr;
+		ir3_node *pre_n  = then_n - 1;
+		idx_t pre_idx = (void*) pre_n - f->nodes.buf.addr;
+		then_n->begin = pre_n->end = dyn_arr_size(&f->ins);
+		assert(pre_n->next1 == 0xff);
+		pre_n->next1 = then_n - (ir3_node*)f->nodes.buf.addr;
+		then_n->next1 = then_n->next2 = -1;
+		ir3_stmt(f, s->ifelse.s_then, stk, a);
+
+		ir3_node *else_n;
+		idx_t else_idx;
+		assert(s->ifelse.s_else);
+		if (s->ifelse.s_else) {
+			br = f->ins.buf.addr + br_idx;
+			br->R = dyn_arr_size(&f->nodes)/sizeof(ir3_node);
+			else_n = dyn_arr_push(&f->nodes, NULL, sizeof *else_n, a);
+			else_idx = (void*) else_n - f->nodes.buf.addr;
+			else_n->next1 = else_n->next2 = -1;
+			else_n[-1].end = else_n->begin = dyn_arr_size(&f->ins);
+			pre_n = f->nodes.buf.addr + pre_idx;
+			pre_n->next2 = else_n - (ir3_node*)f->nodes.buf.addr;
+			ir3_stmt(f, s->ifelse.s_else, stk, a);
+		}
+
+		ir3_node *post_n = dyn_arr_push(&f->nodes, NULL, sizeof *post_n, a);
+		post_n->next1 = post_n->next2 = -1;
+		then_n = f->nodes.buf.addr + then_idx;
+		then_n->next1 = post_n - (ir3_node*) f->nodes.buf.addr;
+		else_n = f->nodes.buf.addr + else_idx;
+		else_n->next1 = post_n - (ir3_node*) f->nodes.buf.addr;
+		post_n[-1].end = post_n->begin = dyn_arr_size(&f->ins);
 		break;
 		}
 	default:
@@ -166,7 +239,6 @@ static void ir3_decl_func(ir3_func *f, decl *d, map_stack *stk, allocator *a)
 	map_init(&stk->ast2num, 2, a);
 	for (stmt **iter = scratch_start(d->func_d.body), **end = scratch_end(d->func_d.body); iter != end; iter++) {
 		assert(iter[0]->kind != STMT_BLOCK);
-		assert(iter[0]->kind != STMT_IFELSE);
 		ir3_stmt(f, *iter, stk, a);
 	}
 	ir3_node *last = f->nodes.end - sizeof *last;
@@ -203,16 +275,12 @@ void test_3ac(void)
 
 	allocator *gpa = (allocator*)&malloc_allocator;
 	ast_init(gpa);
-
 	allocator_geom perma;
 	allocator_geom_init(&perma, 16, 8, 0x100, gpa);
-
 	token_init("cr/simpler.cr", ast.temps, &perma.base);
-
 	allocator_geom just_ast;
 	allocator_geom_init(&just_ast, 10, 8, 0x100, gpa);
 	module_t module = parse_module(&just_ast.base);
-
 	scope global;
 	resolve_refs(module, &global, ast.temps, &perma.base);
 	type_check(module, &global);
@@ -220,6 +288,7 @@ void test_3ac(void)
 
 	if (!ast.errors) {
 		ir3_module m3ac = convert_to_3ac(module, &global, gpa);
+		dump_3ac(m3ac);
 		scope_fini(&global, ast.temps);
 		allocator_geom_fini(&just_ast);
 		ast_fini(gpa);
@@ -232,3 +301,12 @@ void test_3ac(void)
 	allocator_geom_fini(&perma);
 }
 
+int dump_3ac(ir3_module m)
+{
+	int printed = 0;
+	for (ir3_func *f = scratch_start(m), *end = scratch_end(m);
+			f != end; f++) {
+		printed += print(stdout, f);
+	}
+	return printed;
+}

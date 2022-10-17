@@ -26,15 +26,19 @@ enum ssa_opcode
 	SSA_COPY,
 	SSA_RET,
 	SSA_PROLOGUE,
-	// SSA_BOOL, // the value is embedded in the L field
+	SSA_SETEQ, SSA_SETNE, SSA_SETLT, SSA_SETLE, SSA_SETGT, SSA_SETGE,
+	SSA_BOOL, // the value is embedded in the L field
 	// SSA_BOOL_NEG,
 	// SSA_PHI, // to = phi L R
 	// SSA_LABEL,
 	// SSA_GOTO,
-	// bcc cc, then, else
-	// SSA_BEQ, SSA_BNEQ, SSA_BLT, SSA_BLEQ, SSA_BGT, SSA_BGEQ,
+	SSA_BR, // br cc, lhs, rhs, then, else // 1 extension
 
 	SSA_NUM
+};
+
+enum ssa_branch_cc {
+	SSAB_EQ, SSAB_NE, SSAB_LT, SSAB_LE, SSAB_GT, SSAB_GE,
 };
 
 enum ssa_type
@@ -66,6 +70,8 @@ typedef struct ir3_func {
 
 typedef scratch_arr ir3_module;
 ir3_module convert_to_3ac(module_t ast, scope *enclosing, allocator *a);
+
+int dump_3ac(ir3_module m);
 
 #endif /* CROUTE_SSA_H */
 

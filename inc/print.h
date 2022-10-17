@@ -26,7 +26,7 @@ typedef enum printable {
 	P_STRING,
 	P_KEYWORD,
 	P_SOURCE_LINE,
-	P_3ACSYM,
+	P_3AC_FUNC,
 	P_TOKEN,
 	P_TOKEN_KIND,
 
@@ -38,6 +38,7 @@ static_assert(P_END < (1<<PRINTABLE_SHIFT), "increase PRINTABLE_SHIFT");
 			char* /* JUST C THINGS LOL */: P_STRING, \
 			ident_t : P_KEYWORD, \
 			source_idx : P_SOURCE_LINE, \
+			ir3_func* : P_3AC_FUNC, \
 			token : P_TOKEN, \
 			token_kind : P_TOKEN_KIND \
 			))

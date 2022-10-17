@@ -33,7 +33,8 @@ static void resolve_expr(expr *e, scope_stack_l *list, allocator *up, allocator 
 				it != end; it++)
 			resolve_expr(*it, list, up, final);
 		break;
-	case EXPR_BINARY:
+	case EXPR_ADD:
+	case EXPR_CMP:
 		resolve_expr(e->binary.L, list, up, final);
 		resolve_expr(e->binary.R, list, up, final);
 		break;

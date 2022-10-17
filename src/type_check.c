@@ -59,7 +59,8 @@ static type_t *type_check_expr(expr *e, scope_stack_l *stk, value_category c)
 		}
 		return entry? scope2decl(entry->v)->type: &type_missing;
 		}
-	case EXPR_BINARY:
+	case EXPR_ADD:
+	case EXPR_CMP:
 		{
 		if (!expect_or(c == RVALUE,
 				e->pos, "cannot assign to the result of binary expression.\n")) goto err;
@@ -68,7 +69,7 @@ static type_t *type_check_expr(expr *e, scope_stack_l *stk, value_category c)
 		type_t *R = type_check_expr(e->binary.R, stk, RVALUE);
 		if (!expect_or(same_type(L, R) && same_type(L, &type_int32),
 				e->pos, "operands incompatible with this operation.\n")) goto err;
-		return e->binary.op == '+' || e->binary.op == '-' ? L: &type_bool;
+		return e->kind == EXPR_ADD? L: &type_bool;
 		}
 	case EXPR_UNARY:
 		{

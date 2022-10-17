@@ -136,7 +136,7 @@ expr *parse_expr_add(allocator *up)
 		sum->binary.L = L;
 		sum->binary.R = R;
 		sum->binary.op = kind;
-		sum->kind = EXPR_BINARY;
+		sum->kind = EXPR_ADD;
 		sum->pos = snapshot.pos;
 		L = sum;
 		snapshot = tokens.current;
@@ -155,7 +155,7 @@ expr *parse_expr_cmp(allocator *up)
 		cmp->binary.L = L;
 		cmp->binary.R = R;
 		cmp->binary.op = kind;
-		cmp->kind = EXPR_BINARY;
+		cmp->kind = EXPR_CMP;
 		cmp->pos = snapshot.pos;
 		if (!expect_or(!token_match_precedence(TOKEN_EQ),
 			snapshot.pos, "Nesting comparisons is not supported. You may use parentheses.\n"))
@@ -323,7 +323,7 @@ void test_ast(void)
 	// TODO: change print a bit
 	extern int printf(const char *, ...);
 	printf("==AST==\n");
-	allocator *gpa = &malloc_allocator;
+	allocator *gpa = (allocator*)&malloc_allocator;
 	ast_init(gpa);
 	allocator_geom perma;
 	allocator_geom_init(&perma, 16, 8, 0x100, gpa);

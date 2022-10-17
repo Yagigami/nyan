@@ -56,37 +56,24 @@ static int fprint_source_line(FILE *to, source_idx offset)
 	return fprintf(to, "%s:%d:%.*s\n", tokens.cpath, line, len, start);
 }
 
-#if 0
-static int fprint_3acinstr(FILE *to, ssa_instr *i, int *extra_offset)
+static int fprint_ir3_instr(FILE *to, ssa_instr *i, int *extra_offset)
 {
-	static const char *opc2s[SSA_BGEQ-SSA_BEQ+1] = { "beq", "bne", "blt", "ble", "bgt", "bge" };
+	static const char *opc2s[SSAB_GE-SSAB_EQ+1] = { "eq", "ne", "lt", "le", "gt", "ge" };
 	switch (i->kind) {
-	case SSA_INT:
-		{
-		int prn = fprintf(to, "%%%hhx = #", i++->to);
-		uint64_t val = i++->v;
-		val |= (uint64_t) i->v << 32;
-		*extra_offset = 2;
-		return prn + fprintf(to, "%lx\n", val);
-		}
-	case SSA_GLOBAL_REF:
-		*extra_offset = 1;
-		return fprintf(to, "%%%hhx = GLOBAL.%x\n", i[0].to, i[1].v);
-	case SSA_PHI:
-		*extra_offset = 1;
-		return fprintf(to, "%%%hhx = phi [%%%hhx: L%hhx] [%%%hhx: L%hhx]\n", i[0].to, i[0].L, i[1].L, i[0].R, i[1].R);
+	case SSA_IMM:
+		*extra_offset = sizeof *i;
+		return fprintf(to, "%%%hhx = #%x\n", i->to, i[1].v);
+	case SSA_BR:
+		*extra_offset = sizeof *i;
+		return fprintf(to, "br %s, %%%hhx, %%%hhx, L%hhx, L%hhx\n", opc2s[i->to], i->L, i->R, i[1].L, i[1].R);
 	case SSA_PROLOGUE: return fprintf(to, "enter\n");
 	case SSA_RET: return fprintf(to, "ret %%%hhx\n", i->to);
 	case SSA_COPY: return fprintf(to, "%%%hhx = %%%hhx\n", i->to, i->L);
-	case SSA_BOOL: return fprintf(to, "%%%hhx = bool(%d)\n", i->to, i->L);
+	case SSA_BOOL: return fprintf(to, "%%%hhx = %db\n", i->to, i->L);
 	case SSA_CALL: return fprintf(to, "%%%hhx = call %%%hhx\n", i->to, i->L);
-	case SSA_BOOL_NEG: return fprintf(to, "%%%hhx = bool_neg %%%hhx\n", i->to, i->L);
+	case SSA_GLOBAL_REF: return fprintf(to, "%%%hhx = GLOBAL.%x\n", i->to, i->L);
 	case SSA_ADD: return fprintf(to, "%%%hhx = add %%%hhx, %%%hhx\n", i->to, i->L, i->R);
 	case SSA_SUB: return fprintf(to, "%%%hhx = sub %%%hhx, %%%hhx\n", i->to, i->L, i->R);
-	case SSA_LABEL: return fprintf(to, "L%hhx:\n", i->to);
-	case SSA_GOTO: return fprintf(to, "goto L%hhx\n", i->to);
-	case SSA_BEQ: case SSA_BNEQ: case SSA_BLT: case SSA_BLEQ: case SSA_BGT: case SSA_BGEQ:
-		return fprintf(to, "%s %%%hhx, L%hhx, L%hhx\n", opc2s[i->kind - SSA_BEQ], i->to, i->L, i->R);
 	default:
 		return fprintf(to, "unknown<%hhx %hhx %hhx %hhx>\n", i->kind, i->to, i->L, i->R);
 	}
@@ -100,20 +87,29 @@ static int fprint_spaces(FILE *to, int num)
 	return fprintf(to, "%.*s", num, buf);
 }
 
-static int fprint_3acsym(FILE *to, ssa_sym sym)
+static int fprint_ir3_node(FILE *to, const ir3_func *f, const ir3_node *node, ptrdiff_t idx)
 {
-	int prn = fprintf(to, "GLOBAL.%x: %.*s\n", sym.idx, (int) ident_len(sym.name), ident_str(sym.name));
-	int indent = 2;
-	for (ssa_instr *it = scratch_start(sym.ins), *end = scratch_end(sym.ins);
-			it != end; it++) {
-		prn += fprint_spaces(to, indent);
+	int indent = 3;
+	int printed = fprintf(to, "L%tx -> L%hhx, L%hhx:\n", idx, node->next1, node->next2);
+	for (idx_t i = node->begin; i < node->end; i += sizeof(ssa_instr)) {
+		ssa_instr *instr = f->ins.buf.addr + i;
 		int extra = 0;
-		prn += fprint_3acinstr(to, it, &extra);
-		it += extra;
+		printed += fprint_spaces(to, indent);
+		printed += fprint_ir3_instr(to, instr, &extra);
+		i += extra;
 	}
-	return prn + fprintf(to, "\n");
+	return printed + fprintf(to, "\n");
 }
-#endif
+
+static int fprint_ir3_func(FILE *to, const ir3_func *f)
+{
+	int printed = 0;
+	for (const ir3_node *start = f->nodes.buf.addr, *end = f->nodes.end,
+			*node = start; node != end; node++) {
+		printed += fprint_ir3_node(to, f, node, node - start);
+	}
+	return printed;
+}
 
 int _print_impl(FILE *to, uint64_t bitmap, ...)
 {
@@ -137,6 +133,9 @@ int _print_impl(FILE *to, uint64_t bitmap, ...)
 		break;
 	case P_SOURCE_LINE:
 		printed += fprint_source_line(to, va_arg(args, source_idx));
+		break;
+	case P_3AC_FUNC:
+		printed += fprint_ir3_func(to, va_arg(args, ir3_func*));
 		break;
 	default:
 		__builtin_unreachable();
