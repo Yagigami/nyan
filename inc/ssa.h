@@ -70,9 +70,18 @@ typedef struct ir3_func {
 } ir3_func;
 
 typedef scratch_arr ir3_module;
-ir3_module convert_to_3ac(module_t ast, scope *enclosing, allocator *a);
+ir3_module convert_to_3ac(module_t ast, scope *enclosing, dyn_arr *globals, allocator *a);
 
-int dump_3ac(ir3_module m);
+int dump_3ac(ir3_module m, map_entry *globals);
+
+#define LINFO_TYPE 5
+#define LINFO_ALIGN 3
+#define LINFO_SIZE 24
+
+#define LINFO(size,log2a,type) ((type)|(log2a)<<LINFO_TYPE|(size)<<(LINFO_TYPE+LINFO_ALIGN))
+#define LINFO_GET_SIZE(linfo) ((linfo)>>(LINFO_TYPE+LINFO_ALIGN))
+#define LINFO_GET_ALIGN(linfo) (1<<(((linfo)>>LINFO_TYPE)&((1<<LINFO_ALIGN)-1)))
+#define LINFO_GET_TYPE(linfo) ((linfo)&((1<<LINFO_TYPE)-1))
 
 #endif /* CROUTE_SSA_H */
 

@@ -10,19 +10,11 @@
 #include "gen/x86-64.h"
 #include "gen/elf64.h"
 
+#include <string.h>
 #include <assert.h>
 #include <stdbool.h>
 
-#define LINFO_TYPE 5
-#define LINFO_ALIGN 3
-#define LINFO_SIZE 24
-
 static int _string_cmp2(key_t L, key_t R) { return L - R; }
-
-#define LINFO(size,log2a,type) ((type)|(log2a)<<LINFO_TYPE|(size)<<(LINFO_TYPE+LINFO_ALIGN))
-#define LINFO_GET_SIZE(linfo) ((linfo)>>(LINFO_TYPE+LINFO_ALIGN))
-#define LINFO_GET_ALIGN(linfo) (1<<(((linfo)>>LINFO_TYPE)&((1<<LINFO_ALIGN)-1)))
-#define LINFO_GET_TYPE(linfo) ((linfo)&((1<<LINFO_TYPE)-1))
 
 local_info ssa_linfo(idx_t size, size_t align, enum ssa_type type)
 {
@@ -129,8 +121,8 @@ case EXPR_CMP:
 	// wanted to work around adding this redundant SET instruction,
 	// but adding a jump in here while converting to a CFG will
 	// probably just give me bugs.
-	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_SET, cc, L, R }, sizeof(ssa_instr), a);
-	dyn_arr_push(&f->ins, &(ssa_instr){ .to=number }, sizeof(ssa_instr), a);
+	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_SET, number, L, R }, sizeof(ssa_instr), a);
+	dyn_arr_push(&f->ins, &(ssa_instr){ .to=cc }, sizeof(ssa_instr), a);
 	return number;
 	}
 
@@ -262,13 +254,24 @@ static void ir3_decl_func(ir3_func *f, decl *d, map_stack *stk, scope** fsc, all
 }
 
 // TODO:
-// 1. copy the globals' names. free the rest
-// 2. convert to 2AC (probably need something different from ir3_func, or just free `nodes` at least)
-// 3. update gen/x86-64.c according to the changes in ssa.c
-// 4. convert to SSA
-// 5. convert out of SSA
+// 1. convert to 2AC (probably need something different from ir3_func, or just free `nodes` at least)
+// 2. update gen/x86-64.c according to the changes in ssa.c
+// 3. convert to SSA
+// 4. convert out of SSA
 
-ir3_module convert_to_3ac(module_t ast, scope *enclosing, allocator *a)
+static map_entry global_name(ident_t name, size_t len, allocator *a)
+{
+	const char *src = (char*) name;
+	allocation m = ALLOC(a, len+1, 1); // NUL
+	assert(m.size == len+1);
+	char *dst = m.addr;
+	memcpy(dst, src, len);
+	dst[len] = '\0';
+	map_entry r = { .k=(key_t)dst, .v=len };
+	return r;
+}
+
+ir3_module convert_to_3ac(module_t ast, scope *enclosing, dyn_arr *globals, allocator *a)
 {
 	dyn_arr funcs;
 	dyn_arr_init(&funcs, 0, a);
@@ -282,6 +285,8 @@ ir3_module convert_to_3ac(module_t ast, scope *enclosing, allocator *a)
 		map_entry *e = map_add(&bottom.ast2num, d->name, intern_hash, a);
 		e->k = d->name;
 		e->v = iter-start;
+		map_entry global = global_name(d->name, ident_len(d->name), a);
+		dyn_arr_push(globals, &global, sizeof global, a);
 		ir3_decl_func(dyn_arr_push(&funcs, NULL, sizeof(ir3_func), a),
 				d, &bottom, &fsc, a);
 	}
@@ -306,11 +311,9 @@ void test_3ac(void)
 
 	allocator *gpa = (allocator*)&malloc_allocator;
 	ast_init(gpa);
-	allocator_geom perma;
-	allocator_geom_init(&perma, 16, 8, 0x100, gpa);
+	allocator_geom perma; allocator_geom_init(&perma, 16, 8, 0x100, gpa);
 	token_init("cr/basic.cr", ast.temps, &perma.base);
-	allocator_geom just_ast;
-	allocator_geom_init(&just_ast, 10, 8, 0x100, gpa);
+	allocator_geom just_ast; allocator_geom_init(&just_ast, 10, 8, 0x100, gpa);
 	module_t module = parse_module(&just_ast.base);
 	scope global;
 	resolve_refs(module, &global, ast.temps, &perma.base);
@@ -318,28 +321,31 @@ void test_3ac(void)
 	token_fini();
 
 	if (!ast.errors) {
-		ir3_module m3ac = convert_to_3ac(module, &global, gpa);
+		dyn_arr names; dyn_arr_init(&names, 0, gpa);
+		ir3_module m3ac = convert_to_3ac(module, &global, &names, gpa);
+		map_fini(&tokens.idents, tokens.up);
 		scope_fini(&global, ast.temps);
+		allocator_geom_fini(&perma);
 		allocator_geom_fini(&just_ast);
 		ast_fini(gpa);
 
-		dump_3ac(m3ac);
+		dump_3ac(m3ac, names.buf.addr);
 		ir3_fini(m3ac, gpa);
+		for (map_entry *s = names.buf.addr; s != names.end; s++) {
+			allocation m = { (void*)s->k, s->v };
+			DEALLOC(gpa, m);
+		}
+		dyn_arr_fini(&names, gpa);
 	}
-
-	// FIXME: right now i need to free those after the object file is generated.
-	// technically i only need the permanent (read: static) objects' names to be
-	// preserved.
-	map_fini(&tokens.idents, tokens.up);
-	allocator_geom_fini(&perma);
+	// FIXME: else leaks
 }
 
-int dump_3ac(ir3_module m)
+int dump_3ac(ir3_module m, map_entry *globals)
 {
 	int printed = 0;
-	for (ir3_func *f = scratch_start(m), *end = scratch_end(m);
-			f != end; f++) {
-		printed += print(stdout, f);
+	for (ir3_func *start = scratch_start(m), *end = scratch_end(m),
+			*f = start; f != end; f++) {
+		printed += print(stdout, (char*)globals[f-start].k, ":\n", f);
 	}
 	return printed;
 }

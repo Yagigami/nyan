@@ -56,31 +56,35 @@ static int fprint_source_line(FILE *to, source_idx offset)
 	return fprintf(to, "%s:%d:%.*s\n", tokens.cpath, line, len, start);
 }
 
-static int fprint_ir3_instr(FILE *to, ssa_instr *i, int *extra_offset)
+static int fprint_ir3_instr(FILE *to, ssa_instr *i, int *extra_offset, dyn_arr *locals)
 {
+	local_info *linfo = locals->buf.addr + i->to * sizeof *linfo;
+	static const char *type2s[SSAT_NUM] = { "<none>", "int32", "bool" };
+#define T type2s[LINFO_GET_TYPE(*linfo)]
 	static const char *opc2s[SSAB_GE-SSAB_EQ+1] = { "eq", "ne", "lt", "le", "gt", "ge" };
 	switch (i->kind) {
 	case SSA_SET:
 		*extra_offset = sizeof *i;
-		return fprintf(to, "set(%s) %%%hhx, %%%hhx, %%%hhx\n", opc2s[i->to-SSAB_EQ], i[1].to, i->L, i->R);
+		return fprintf(to, "set(%s) %%%hhx:%s, %%%hhx, %%%hhx\n", opc2s[i[1].to-SSAB_EQ], i->to, T, i->L, i->R);
 	case SSA_IMM:
 		*extra_offset = sizeof *i;
-		return fprintf(to, "%%%hhx = #%x\n", i->to, i[1].v);
+		return fprintf(to, "%%%hhx:%s = #%x\n", i->to, T, i[1].v);
 	case SSA_BR:
 		*extra_offset = sizeof *i;
-		return fprintf(to, "br(%s) %%%hhx, %%%hhx, L%hhx, L%hhx\n", opc2s[i->to], i->L, i->R, i[1].L, i[1].R);
+		return fprintf(to, "br(%s) %%%hhx:%s, %%%hhx, L%hhx, L%hhx\n", opc2s[i->to], i->L, T, i->R, i[1].L, i[1].R);
 	case SSA_PROLOGUE: return fprintf(to, "enter\n");
-	case SSA_RET: return fprintf(to, "ret %%%hhx\n", i->to);
+	case SSA_RET: return fprintf(to, "ret %%%hhx:%s\n", i->to, T);
 	case SSA_GOTO: return fprintf(to, "goto L%hhx\n", i->to);
-	case SSA_BOOL: return fprintf(to, "%%%hhx = %db\n", i->to, i->L);
-	case SSA_COPY: return fprintf(to, "%%%hhx = %%%hhx\n", i->to, i->L);
-	case SSA_CALL: return fprintf(to, "%%%hhx = call %%%hhx\n", i->to, i->L);
-	case SSA_GLOBAL_REF: return fprintf(to, "%%%hhx = GLOBAL.%x\n", i->to, i->L);
-	case SSA_ADD: return fprintf(to, "%%%hhx = add %%%hhx, %%%hhx\n", i->to, i->L, i->R);
-	case SSA_SUB: return fprintf(to, "%%%hhx = sub %%%hhx, %%%hhx\n", i->to, i->L, i->R);
+	case SSA_BOOL: return fprintf(to, "%%%hhx:%s = %db\n", i->to, T, i->L);
+	case SSA_COPY: return fprintf(to, "%%%hhx:%s = %%%hhx\n", i->to, T, i->L);
+	case SSA_CALL: return fprintf(to, "%%%hhx:%s = call %%%hhx\n", i->to, T, i->L);
+	case SSA_GLOBAL_REF: return fprintf(to, "%%%hhx:%s = GLOBAL.%x\n", i->to, T, i->L);
+	case SSA_ADD: return fprintf(to, "%%%hhx:%s = add %%%hhx, %%%hhx\n", i->to, T, i->L, i->R);
+	case SSA_SUB: return fprintf(to, "%%%hhx:%s = sub %%%hhx, %%%hhx\n", i->to, T, i->L, i->R);
 	default:
 		return fprintf(to, "unknown<%hhx %hhx %hhx %hhx>\n", i->kind, i->to, i->L, i->R);
 	}
+#undef  T
 }
 
 static int fprint_spaces(FILE *to, int num)
@@ -93,13 +97,13 @@ static int fprint_spaces(FILE *to, int num)
 
 static int fprint_ir3_node(FILE *to, const ir3_func *f, const ir3_node *node, ptrdiff_t idx)
 {
-	int indent = 3;
-	int printed = fprintf(to, "L%tx:\n", idx);
+	int indent = 4;
+	int printed = fprintf(to, "L%tx: ", idx);
 	for (idx_t i = node->begin; i < node->end; i += sizeof(ssa_instr)) {
 		ssa_instr *instr = f->ins.buf.addr + i;
 		int extra = 0;
-		printed += fprint_spaces(to, indent);
-		printed += fprint_ir3_instr(to, instr, &extra);
+		if (i != node->begin) printed += fprint_spaces(to, indent);
+		printed += fprint_ir3_instr(to, instr, &extra, &f->locals);
 		i += extra;
 	}
 	return printed + fprintf(to, "\n");
