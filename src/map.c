@@ -31,7 +31,7 @@ map_entry *map_rehash_if_needed(map *map, map_entry *watch, map_hash hash, alloc
 	size_t cap = map->m.size/sizeof(map_entry);
 	if (map->cnt + 1 <= cap) return watch;
 	size_t growth_factor = 2;
-	size_t size_after = map->cnt * sizeof(map_entry);
+	size_t size_after = (map->cnt + 1) * sizeof(map_entry);
 	size_t new_size = growth_factor*map->m.size;
 	if (new_size < size_after) new_size = size_after;
 	allocation m = ALLOC(a, new_size, 16);
@@ -56,7 +56,12 @@ map_entry *map_rehash_if_needed(map *map, map_entry *watch, map_hash hash, alloc
 map_entry *map_id(map *map, key_t k, map_hash hash, map_cmp cmp, bool *inserted, allocator *a)
 {
 	size_t cap = map->m.size / sizeof(map_entry);
-	assert(cap >= 2);
+	if (!cap) {
+		map_entry *new = map_add(map, k, hash, a);
+		*inserted = true;
+		new->k = k;
+		return new;
+	}
 	size_t h = hash(k);
 	for (size_t i=h%cap;; i = (i+1) % cap) {
 		map_entry *e = map->m.addr + i*sizeof *e;
@@ -107,7 +112,7 @@ void test_map(void)
 {
 	map m;
 	allocator *up = (allocator*)&malloc_allocator;
-	int e = map_init(&m, 2, up);
+	int e = map_init(&m, 0, up);
 	assert(e == 0);
 	bool inserted;
 	map_entry *pa  = map_id(&m, (uintptr_t) "aaa", test_hash, test_cmp, &inserted, up);

@@ -231,7 +231,7 @@ case STMT_BLOCK:
 	{
 	scope *sub = scratch_start(blk[0]->sub);
 	map_stack top = { .scope=(*blk)++, .next=stk };
-	map_init(&top.ast2num, 2, a);
+	map_init(&top.ast2num, 0, a);
 	for (stmt **iter = scratch_start(s->blk), **end = scratch_end(s->blk); iter != end; iter++) {
 		ir3_stmt(f, *iter, &top, &sub, a);
 	}
@@ -252,7 +252,7 @@ static void ir3_decl_func(ir3_func *f, decl *d, map_stack *stk, scope** fsc, all
 	dyn_arr_init(&f->locals, 0, a);
 	scope *sub = scratch_start(fsc[0]->sub);
 	map_stack top = { .scope=(*fsc)++, .next=stk };
-	map_init(&top.ast2num, 2, a);
+	map_init(&top.ast2num, 0, a);
 	for (stmt **iter = scratch_start(d->func_d.body), **end = scratch_end(d->func_d.body); iter != end; iter++) {
 		ir3_stmt(f, *iter, &top, &sub, a);
 	}
@@ -261,12 +261,19 @@ static void ir3_decl_func(ir3_func *f, decl *d, map_stack *stk, scope** fsc, all
 	last->end = dyn_arr_size(&f->ins);
 }
 
+// TODO:
+// 1. copy the globals' names. free the rest
+// 2. convert to 2AC (probably need something different from ir3_func, or just free `nodes` at least)
+// 3. update gen/x86-64.c according to the changes in ssa.c
+// 4. convert to SSA
+// 5. convert out of SSA
+
 ir3_module convert_to_3ac(module_t ast, scope *enclosing, allocator *a)
 {
 	dyn_arr funcs;
 	dyn_arr_init(&funcs, 0, a);
 	map_stack bottom = { .scope=enclosing, .next=NULL };
-	map_init(&bottom.ast2num, 2, a);
+	map_init(&bottom.ast2num, 0, a);
 	scope *fsc = scratch_start(enclosing->sub);
 	for (decl_idx *start = scratch_start(ast), *end = scratch_end(ast),
 			*iter = start; iter != end; iter++) {
@@ -280,6 +287,16 @@ ir3_module convert_to_3ac(module_t ast, scope *enclosing, allocator *a)
 	}
 	map_fini(&bottom.ast2num, a);
 	return scratch_from(&funcs, a, a);
+}
+
+static void ir3_fini(ir3_module m, allocator *a)
+{
+	for (ir3_func *f = scratch_start(m); f != scratch_end(m); f++) {
+		dyn_arr_fini(&f->ins, a);
+		dyn_arr_fini(&f->nodes, a);
+		dyn_arr_fini(&f->locals, a);
+	}
+	scratch_fini(m, a);
 }
 
 void test_3ac(void)
@@ -302,10 +319,12 @@ void test_3ac(void)
 
 	if (!ast.errors) {
 		ir3_module m3ac = convert_to_3ac(module, &global, gpa);
-		dump_3ac(m3ac);
 		scope_fini(&global, ast.temps);
 		allocator_geom_fini(&just_ast);
 		ast_fini(gpa);
+
+		dump_3ac(m3ac);
+		ir3_fini(m3ac, gpa);
 	}
 
 	// FIXME: right now i need to free those after the object file is generated.
