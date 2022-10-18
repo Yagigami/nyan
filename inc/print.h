@@ -22,11 +22,14 @@ bool expect_or(bool condition, ...);
 		## __VA_ARGS__)
 #define expect_or(cond, ...) ((cond) ? true: (print(stderr, ## __VA_ARGS__, "\n"), ast_one_more_error(), false)) // STUPID PRECEDENCE RULES LOL
 
+typedef struct print_int { ptrdiff_t v; } print_int;
+
 typedef enum printable {
 	P_STRING,
 	P_KEYWORD,
 	P_SOURCE_LINE,
 	P_3AC_FUNC,
+	P_INT,
 	P_TOKEN,
 	P_TOKEN_KIND,
 
@@ -38,6 +41,7 @@ static_assert(P_END < (1<<PRINTABLE_SHIFT), "increase PRINTABLE_SHIFT");
 			char* /* JUST C THINGS LOL */: P_STRING, \
 			ident_t : P_KEYWORD, \
 			source_idx : P_SOURCE_LINE, \
+			print_int : P_INT, \
 			ir3_func* : P_3AC_FUNC, \
 			token : P_TOKEN, \
 			token_kind : P_TOKEN_KIND \

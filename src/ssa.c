@@ -294,6 +294,64 @@ ir3_module convert_to_3ac(module_t ast, scope *enclosing, dyn_arr *globals, allo
 	return scratch_from(&funcs, a, a);
 }
 
+static const enum ssa_branch_cc invert_cc[SSAB_NUM] = {
+	[SSAB_EQ] = SSAB_NE, [SSAB_NE] = SSAB_EQ,
+	[SSAB_LT] = SSAB_GE, [SSAB_LE] = SSAB_GT,
+	[SSAB_GT] = SSAB_LE, [SSAB_GE] = SSAB_LT,
+};
+
+static void ir2_decl_func(ir3_func *dst, ir3_func *src, allocator *a)
+{
+	dyn_arr_init(&dst->ins, 0, a);
+	dyn_arr_init(&dst->nodes, 0, a); // just lazy to make a new type without them
+	dst->locals = src->locals;
+	for (const ir3_node *start = src->nodes.buf.addr, *node = start; node != src->nodes.end; node++) {
+		dyn_arr_push(&dst->ins, &(ssa_instr){ .kind=SSA_LABEL, node-start }, sizeof(ssa_instr), a);
+		for (const ssa_instr *instr = src->ins.buf.addr + node->begin, *end = src->ins.buf.addr + node->end; instr != end; instr++) switch (instr->kind) {
+		case SSA_IMM:
+		case SSA_SET:
+			dyn_arr_push(&dst->ins, instr, sizeof *instr, a);
+			instr++;
+			/* fallthrough */
+		case SSA_CALL:
+		case SSA_COPY:
+		case SSA_BOOL:
+		case SSA_RET:
+		case SSA_PROLOGUE:
+		case SSA_GLOBAL_REF:
+		case SSA_GOTO:
+			dyn_arr_push(&dst->ins, instr, sizeof *instr, a);
+			break;
+		case SSA_ADD:
+		case SSA_SUB:
+			dyn_arr_push(&dst->ins, &(ssa_instr){ .kind=SSA_COPY, instr->to, instr->L }, sizeof *instr, a);
+			dyn_arr_push(&dst->ins, &(ssa_instr){ .kind=instr->kind, instr->to, instr->to, instr->R }, sizeof *instr, a);
+			break;
+		case SSA_BR:
+			dyn_arr_push(&dst->ins, &(ssa_instr){ .kind=SSA_BR, invert_cc[instr->to], instr->L, instr->R }, sizeof *instr, a);
+			dyn_arr_push(&dst->ins, &(ssa_instr){ .L=instr[1].R }, sizeof *instr, a);
+			instr++;
+			break;
+		default:
+			assert(0);
+		}
+	}
+	dyn_arr_fini(&src->ins, a);
+	dyn_arr_fini(&src->nodes, a);
+	dyn_arr_push(&dst->nodes, &(ir3_node){ .begin=0, .end=dyn_arr_size(&dst->ins) }, sizeof(ir3_node), a);
+}
+
+ir3_module convert_to_2ac(ir3_module m3ac, allocator *a)
+{
+	dyn_arr m2ac; dyn_arr_init(&m2ac, 0, a);
+	for (ir3_func *src = scratch_start(m3ac); src != scratch_end(m3ac); src++) {
+		ir3_func *dst = dyn_arr_push(&m2ac, NULL, sizeof *dst, a);
+		ir2_decl_func(dst, src, a);
+	}
+	scratch_fini(m3ac, a);
+	return scratch_from(&m2ac, a, a);
+}
+
 static void ir3_fini(ir3_module m, allocator *a)
 {
 	for (ir3_func *f = scratch_start(m); f != scratch_end(m); f++) {
@@ -329,8 +387,13 @@ void test_3ac(void)
 		allocator_geom_fini(&just_ast);
 		ast_fini(gpa);
 
+		print(stdout, "3-address code:\n");
 		dump_3ac(m3ac, names.buf.addr);
-		ir3_fini(m3ac, gpa);
+		ir3_module m2ac = convert_to_2ac(m3ac, gpa);
+		print(stdout, "2-address code:\n");
+		dump_3ac(m2ac, names.buf.addr);
+
+		ir3_fini(m2ac, gpa);
 		for (map_entry *s = names.buf.addr; s != names.end; s++) {
 			allocation m = { (void*)s->k, s->v };
 			DEALLOC(gpa, m);
@@ -345,7 +408,7 @@ int dump_3ac(ir3_module m, map_entry *globals)
 	int printed = 0;
 	for (ir3_func *start = scratch_start(m), *end = scratch_end(m),
 			*f = start; f != end; f++) {
-		printed += print(stdout, (char*)globals[f-start].k, ":\n", f);
+		printed += print(stdout, (char*)globals[f-start].k, "(", (print_int){ f-start }, "):\n", f);
 	}
 	return printed;
 }

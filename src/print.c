@@ -73,8 +73,9 @@ static int fprint_ir3_instr(FILE *to, ssa_instr *i, int *extra_offset, dyn_arr *
 		*extra_offset = sizeof *i;
 		return fprintf(to, "br(%s) %%%hhx:%s, %%%hhx, L%hhx, L%hhx\n", opc2s[i->to], i->L, T, i->R, i[1].L, i[1].R);
 	case SSA_PROLOGUE: return fprintf(to, "enter\n");
-	case SSA_RET: return fprintf(to, "ret %%%hhx:%s\n", i->to, T);
 	case SSA_GOTO: return fprintf(to, "goto L%hhx\n", i->to);
+	case SSA_LABEL: return fprintf(to, "label L%hhx\n", i->to);
+	case SSA_RET: return fprintf(to, "ret %%%hhx:%s\n", i->to, T);
 	case SSA_BOOL: return fprintf(to, "%%%hhx:%s = %db\n", i->to, T, i->L);
 	case SSA_COPY: return fprintf(to, "%%%hhx:%s = %%%hhx\n", i->to, T, i->L);
 	case SSA_CALL: return fprintf(to, "%%%hhx:%s = call %%%hhx\n", i->to, T, i->L);
@@ -106,7 +107,7 @@ static int fprint_ir3_node(FILE *to, const ir3_func *f, const ir3_node *node, pt
 		printed += fprint_ir3_instr(to, instr, &extra, &f->locals);
 		i += extra;
 	}
-	return printed + fprintf(to, "\n");
+	return printed;
 }
 
 static int fprint_ir3_func(FILE *to, const ir3_func *f)
@@ -116,7 +117,7 @@ static int fprint_ir3_func(FILE *to, const ir3_func *f)
 			*node = start; node != end; node++) {
 		printed += fprint_ir3_node(to, f, node, node - start);
 	}
-	return printed;
+	return printed + fprintf(to, "\n");
 }
 
 int _print_impl(FILE *to, uint64_t bitmap, ...)
@@ -144,6 +145,9 @@ int _print_impl(FILE *to, uint64_t bitmap, ...)
 		break;
 	case P_3AC_FUNC:
 		printed += fprint_ir3_func(to, va_arg(args, ir3_func*));
+		break;
+	case P_INT:
+		printed += fprintf(to, "%tx", va_arg(args, print_int).v);
 		break;
 	default:
 		__builtin_unreachable();
