@@ -74,9 +74,7 @@ case EXPR_NAME:
 	}
 	if (!it->next) { // this is a global scope reference -> it gets referenced in a local
 		number = new_local(&f->locals, linfo_int32, a);
-		map_entry *corresponding = map_find(&it->scope->refs, name, h, _string_cmp2); assert(corresponding);
-		ssa_ref index = corresponding->v;
-		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_GLOBAL_REF, number, index }, sizeof(ssa_instr), a);
+		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_GLOBAL_REF, number, ent->v }, sizeof(ssa_instr), a);
 		ent = map_add(&stk->ast2num, name, intern_hash, a);
 		ent->k = name;
 		ent->v = number;
@@ -254,10 +252,8 @@ static void ir3_decl_func(ir3_func *f, decl *d, map_stack *stk, scope** fsc, all
 }
 
 // TODO:
-// 1. convert to 2AC (probably need something different from ir3_func, or just free `nodes` at least)
-// 2. update gen/x86-64.c according to the changes in ssa.c
-// 3. convert to SSA
-// 4. convert out of SSA
+// 1. convert to SSA
+// 2. convert out of SSA
 
 static map_entry global_name(ident_t name, size_t len, allocator *a)
 {
@@ -317,7 +313,6 @@ static void ir2_decl_func(ir3_func *dst, ir3_func *src, allocator *a)
 		case SSA_COPY:
 		case SSA_BOOL:
 		case SSA_RET:
-		case SSA_PROLOGUE:
 		case SSA_GLOBAL_REF:
 		case SSA_GOTO:
 			dyn_arr_push(&dst->ins, instr, sizeof *instr, a);
@@ -336,6 +331,7 @@ static void ir2_decl_func(ir3_func *dst, ir3_func *src, allocator *a)
 			assert(0);
 		}
 	}
+	dst->num_labels = dyn_arr_size(&src->nodes) / sizeof(ir3_node);
 	dyn_arr_fini(&src->ins, a);
 	dyn_arr_fini(&src->nodes, a);
 	dyn_arr_push(&dst->nodes, &(ir3_node){ .begin=0, .end=dyn_arr_size(&dst->ins) }, sizeof(ir3_node), a);
@@ -393,6 +389,11 @@ void test_3ac(void)
 		print(stdout, "2-address code:\n");
 		dump_3ac(m2ac, names.buf.addr);
 
+		gen_module gen = gen_x86_64(m2ac, gpa);
+		int e = elf_object_from(&gen, "basic.o", &names, gpa);
+		if (e < 0) perror("objfile not generated");
+
+		gen_fini(&gen, gpa);
 		ir3_fini(m2ac, gpa);
 		for (map_entry *s = names.buf.addr; s != names.end; s++) {
 			allocation m = { (void*)s->k, s->v };

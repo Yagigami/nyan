@@ -56,7 +56,7 @@ static int fprint_source_line(FILE *to, source_idx offset)
 	return fprintf(to, "%s:%d:%.*s\n", tokens.cpath, line, len, start);
 }
 
-static int fprint_ir3_instr(FILE *to, ssa_instr *i, int *extra_offset, dyn_arr *locals)
+static int fprint_ir3_instr(FILE *to, const ssa_instr *i, int *extra_offset, const dyn_arr *locals)
 {
 	local_info *linfo = locals->buf.addr + i->to * sizeof *linfo;
 	static const char *type2s[SSAT_NUM] = { "<none>", "int32", "bool" };
@@ -72,7 +72,6 @@ static int fprint_ir3_instr(FILE *to, ssa_instr *i, int *extra_offset, dyn_arr *
 	case SSA_BR:
 		*extra_offset = sizeof *i;
 		return fprintf(to, "br(%s) %%%hhx:%s, %%%hhx, L%hhx, L%hhx\n", opc2s[i->to], i->L, T, i->R, i[1].L, i[1].R);
-	case SSA_PROLOGUE: return fprintf(to, "enter\n");
 	case SSA_GOTO: return fprintf(to, "goto L%hhx\n", i->to);
 	case SSA_LABEL: return fprintf(to, "label L%hhx\n", i->to);
 	case SSA_RET: return fprintf(to, "ret %%%hhx:%s\n", i->to, T);
@@ -144,7 +143,7 @@ int _print_impl(FILE *to, uint64_t bitmap, ...)
 		printed += fprint_source_line(to, va_arg(args, source_idx));
 		break;
 	case P_3AC_FUNC:
-		printed += fprint_ir3_func(to, va_arg(args, ir3_func*));
+		printed += fprint_ir3_func(to, va_arg(args, const ir3_func*));
 		break;
 	case P_INT:
 		printed += fprintf(to, "%tx", va_arg(args, print_int).v);

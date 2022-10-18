@@ -25,7 +25,6 @@ enum ssa_opcode
 	SSA_GLOBAL_REF,
 	SSA_COPY,
 	SSA_RET,
-	SSA_PROLOGUE,
 	SSA_BOOL, // the value is embedded in the L field
 	SSA_LABEL,
 	SSA_SET, // set(cc) dst, lhs, rhs // 1 ext
@@ -69,6 +68,7 @@ typedef struct ir3_func {
 	dyn_arr ins; // ssa_instr
 	dyn_arr nodes;
 	dyn_arr locals; // names are replaced by numbers, but variables can be mutated
+	ssa_ref num_labels; // TODO: make a separate `ir2_func` type
 } ir3_func;
 
 typedef scratch_arr ir3_module;

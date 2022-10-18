@@ -11,12 +11,10 @@
 
 typedef uint8_t byte;
 
-typedef struct idx_pair { idx_t lo, hi; } idx_pair;
+typedef struct gen_reloc { idx_t offset, symref; } gen_reloc;
 typedef struct gen_sym {
-	ident_t name;
-	idx_t idx;
 	scratch_arr ins; // bytes
-	scratch_arr refs; // array of idx_pair lo=offset in symbol, hi=referenced index
+	scratch_arr refs; // array of gen_reloc lo=offset in symbol, hi=referenced index
 } gen_sym;
 
 typedef struct gen_module {
@@ -24,6 +22,9 @@ typedef struct gen_module {
 	idx_t code_size;
 	idx_t num_refs;
 } gen_module;
+
+gen_module gen_x86_64(ir3_module m2ac, allocator *a);
+void gen_fini(gen_module *mod, allocator *a);
 
 #endif /* CROUTE_GEN_X86_64_H */
 

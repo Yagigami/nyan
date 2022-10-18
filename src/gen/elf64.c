@@ -12,7 +12,7 @@
 
 static size_t align(size_t x, size_t a) { return (x + a - 1) / a * a; }
 
-int elf_object_from(gen_module *mod, const char *path, allocator *a)
+int elf_object_from(const gen_module *mod, const char *path, const dyn_arr *names, allocator *a)
 {
 	int status = -1;
 	int fd = open(path, O_CREAT|O_WRONLY, S_IRUSR|S_IWUSR);
@@ -127,6 +127,7 @@ int elf_object_from(gen_module *mod, const char *path, allocator *a)
 	dyn_arr_push(&out, &(char){ '\0' }, 1, a);
 	size_t text_offset = 0;
 	size_t r_idx = 0;
+	map_entry *n = names->buf.addr;
 	for (gen_sym *start = scratch_start(mod->syms), *end = scratch_end(mod->syms), *it = start;
 			it != end; it++) {
 		size_t idx = it - start;
@@ -135,26 +136,26 @@ int elf_object_from(gen_module *mod, const char *path, allocator *a)
 
 		Elf64_Sym *sym = out.buf.addr + shdr[SECTION_SYMTAB].sh_offset + (1+idx) * sizeof *sym;
 		sym->st_name = strtab_offset;
-		strtab_offset += ident_len(it->name) + 1;
+		strtab_offset += n->v + 1;
 		sym->st_info = ELF64_ST_INFO(STB_GLOBAL, STT_FUNC);
 		sym->st_other = STV_DEFAULT;
 		sym->st_shndx = SECTION_TEXT;
 		sym->st_value = text_offset;
 		memcpy(out.buf.addr + shdr[SECTION_TEXT].sh_offset + text_offset, scratch_start(it->ins), scratch_len(it->ins));
 		sym->st_size = 0;
-		for (idx_pair *pair_start = scratch_start(it->refs), *pair_end = scratch_end(it->refs), *pair = pair_start;
+		for (gen_reloc *pair_start = scratch_start(it->refs), *pair_end = scratch_end(it->refs), *pair = pair_start;
 				pair != pair_end; pair++) {
 			Elf64_Rela *reloc = out.buf.addr + shdr[SECTION_RELA_TEXT].sh_offset + r_idx * sizeof *reloc;
-			reloc->r_offset = pair->lo + text_offset;
-			size_t genref2elfsym = 1 + pair->hi;
+			reloc->r_offset = pair->offset + text_offset;
+			size_t genref2elfsym = 1 + pair->symref;
 			reloc->r_info = ELF64_R_INFO(genref2elfsym, R_X86_64_PC32);
 			reloc->r_addend = -4; // e8 @00 00 00 00 $ // you write at @ but the cpu executes the call at $ hence -4
 			r_idx++;
 		}
 		text_offset += scratch_len(it->ins);
 
-		dyn_arr_push(&out, ident_str(it->name), ident_len(it->name), a);
-		dyn_arr_push(&out, &(char){ '\0' }, 1, a); // NUL terminator
+		dyn_arr_push(&out, (char*) n->k, n->v+1, a);
+		n++;
 	}
 	shdr[SECTION_STRTAB].sh_size = strtab_offset;
 

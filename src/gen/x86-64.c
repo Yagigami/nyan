@@ -16,7 +16,7 @@ enum prefix {
 	OP_SIZE_OVERRIDE=0x66,
 };
 
-static byte modrm(int mod, int rm, int reg) { return mod << 6 | (reg & 7) << 3 | rm; }
+static byte modrm(int mod, int rm, int reg) { return mod << 6 | (reg & 7) << 3 | (rm & 7); }
 static byte sib(int ss, int index, int base) { return ss << 6 | (index & 7) << 3 | (base & 7) << 3; }
 static byte rex(int w, int r, int x, int b) { return REX | w<<3 | r<<2 | x<<1 | b<<0; }
 
@@ -128,23 +128,37 @@ static byte *store_imm8(byte *p, idx_t offset, idx_t imm)
 	}
 }
 
+// 2AC EQ/NE/LT/LE/GT/GE
+// Scc 94/95/9c/9e/9f/9d
+// Jcc 84/85/8c/8e/8f/8d
+static const byte bc2cc[SSAB_NUM] = {
+	[SSAB_EQ] = 0x4, [SSAB_NE] = 0x5, [SSAB_LT] = 0xc, [SSAB_LE] = 0xe, [SSAB_GT] = 0xf, [SSAB_GE] = 0xd,
+};
+
+static byte *setcc_mem(byte *p, idx_t offset, enum ssa_branch_cc cc)
+{
+	*p++ = 0x0f;
+	*p++ = 0x90 | bc2cc[cc];
+	*p++ = modrm(2, RBP, 0);
+	return imm32(p, offset);
+}
+
 #define ALIGN(N,A) (((N)+(A)-1)/(A)*(A))
 
-#if 0
-idx_t *gen_lalloc(scratch_arr locals, idx_t *out_stack_space, allocation *to_free, allocator *a)
+idx_t *gen_lalloc(dyn_arr *locals, idx_t *out_stack_space, allocation *to_free, allocator *a)
 {
-	idx_t num_locals = scratch_len(locals) / sizeof(local_info);
+	idx_t num_locals = dyn_arr_size(locals) / sizeof(local_info);
 	allocation temp_alloc = ALLOC(a, num_locals * sizeof(idx_t), 8);
 	idx_t *local_offsets = temp_alloc.addr;
 	idx_t stack_space = 0;
 
-	local_info *l = scratch_start(locals);
+	local_info *l = locals->buf.addr;
 	for (idx_t i = 0; i < num_locals; i++) {
-		idx_t align = ssa_lalign(l[i]);
+		idx_t align = LINFO_GET_ALIGN(l[i]);
 		assert(align == 1 || align == 2 || align == 4 || align == 8);
 		stack_space = ALIGN(stack_space, align);
 		local_offsets[i] = stack_space;
-		stack_space += ssa_lsize(l[i]);
+		stack_space += LINFO_GET_SIZE(l[i]);
 	}
 
 	if ((stack_space - 8) & 0xF) stack_space = ALIGN(stack_space-8, 16)+8;
@@ -152,7 +166,6 @@ idx_t *gen_lalloc(scratch_arr locals, idx_t *out_stack_space, allocation *to_fre
 	*to_free = temp_alloc;
 	return local_offsets;
 }
-#endif
 
 static byte *cmp(byte *p, enum x86_64_reg L, enum x86_64_reg R, int bits)
 {
@@ -170,41 +183,52 @@ static byte *test(byte *p, enum x86_64_reg L, enum x86_64_reg R, int bits)
 	return p;
 }
 
-#if 0
-static idx_t gen_symbol(gen_sym *dst, ssa_sym *src, allocator *a)
+static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 {
-	dst->name = src->name;
-	dst->idx  = src->idx ;
 	dyn_arr ins, refs, label_relocs;
 	dyn_arr_init(&ins, 0, a);
 	dyn_arr_init(&refs, 0, a);
-	dyn_arr_init(&label_relocs, 0*sizeof(idx_pair), a);
+	dyn_arr_init(&label_relocs, 0*sizeof(gen_reloc), a);
 
-	allocation temp_alloc, ta2 = ALLOC(a, (src->labels+1) * sizeof(idx_t), 4);
+	allocation temp_alloc, ta2 = ALLOC(a, src->num_labels * sizeof(idx_t), 4);
 	idx_t *labels = ta2.addr;
 	idx_t stack_space;
-	idx_t *locals = NULL; //gen_lalloc(src->locals, &stack_space, &temp_alloc, a);
+	idx_t *locals = gen_lalloc(&src->locals, &stack_space, &temp_alloc, a);
 
-	for (ssa_instr *start = scratch_start(src->ins), *end = scratch_end(src->ins),
+	byte buf[64], *p = buf;
+	// p = endbr64(p);
+	p = push64(p, RBP);
+	p = addsubimm(p, RSP, stack_space, SSA_SUB, 64);
+	p = mov(p, RBP, RSP, 64);
+	dyn_arr_push(&ins, buf, p-buf, a);
+	for (ssa_instr *start = src->ins.buf.addr, *end = src->ins.end,
 			*i = start; i != end; i++) {
-		byte buf[64], *p = buf;
+		p = buf;
 		switch (i->kind) {
 			case SSA_GOTO:
 				*p++ = 0xe9;
-				dyn_arr_push(&label_relocs, &(idx_pair){ .lo=dyn_arr_size(&ins) + 1, .hi=i->to }, sizeof(idx_pair), a);
+				dyn_arr_push(&label_relocs, &(gen_reloc){ .offset=dyn_arr_size(&ins) + 1, .symref=i->to }, sizeof(gen_reloc), a);
 				p = imm32(p, 0);
 				break;
-			case SSA_BEQ: case SSA_BNEQ: case SSA_BLT: case SSA_BLEQ: case SSA_BGT: case SSA_BGEQ:
-				// TODO: the jump instr shouldnt depend on the cmp instr before.
-				// which is supposed to be used for boolean comparisons
-				// instead this case block should be the one generating a cmp + jcc
+			case SSA_SET:
+				p = load(p, RAX, locals[i->L], 32);
+				p = load(p, RCX, locals[i->R], 32);
+				p = cmp(p, RAX, RCX, 32);
+				p = setcc_mem(p, locals[i->to], i[1].to);
+				i++;
+				break;
+			case SSA_BR:
+				p = load(p, RAX, locals[i->L], 32);
+				p = load(p, RCX, locals[i->R], 32);
+				p = cmp(p, RAX, RCX, 32);
 				*p++ = 0x0f;
-				*p++ =  i->kind == SSA_BEQ ? 0x84: i->kind == SSA_BNEQ? 0x85:
-					i->kind == SSA_BLT ? 0x8c: i->kind == SSA_BLEQ? 0x8e:
-					i->kind == SSA_BGT ? 0x8f: 0x8d;
-				assert(i[-1].kind == SSA_CMP);
-				dyn_arr_push(&label_relocs, &(idx_pair){ .lo=dyn_arr_size(&ins) + 2, .hi=i->L }, sizeof(idx_pair), a);
+				*p++ = 0x80 | bc2cc[i->to];
+				{
+				idx_t offset = dyn_arr_size(&ins) + p - buf;
+				dyn_arr_push(&label_relocs, &(gen_reloc){ .offset=offset, .symref=i[1].L }, sizeof(gen_reloc), a);
+				}
 				p = imm32(p, 0);
+				i++;
 				break;
 			case SSA_COPY:
 				p = load(p, RAX, locals[i->L], 32);
@@ -216,22 +240,15 @@ static idx_t gen_symbol(gen_sym *dst, ssa_sym *src, allocator *a)
 			case SSA_BOOL:
 				p = store_imm8(p, locals[i->to], i->L);
 				break;
-			case SSA_CMP:
-				p = load(p, RAX, locals[i->L], 32);
-				p = load(p, RDX, locals[i->R], 32);
-				p = cmp(p, RAX, RDX, 32);
-				break;
 			case SSA_BOOL_NEG:
 				p = load(p, RDX, locals[i->R], 8);
 				p = test(p, RDX, RDX, 32);
-				assert(0);
-				// p = setcc_mem(p, locals[i->to], SSA_CMPNEQ);
+				p = setcc_mem(p, locals[i->to], SSAB_NE);
 				break;
-			case SSA_INT:
+			case SSA_IMM:
 				p = mov_imm32(p, RAX, i[1].v);
-				// ignore i[2].v as for now we only operate on 32-bit ints
 				p = store(p, RAX, locals[i->to], 32);
-				i += 2; // because of the 2 extensions
+				i++; // because of the extension
 				break;
 			case SSA_ADD: case SSA_SUB:
 				p = load(p, RAX, locals[i->to], 32);
@@ -242,28 +259,21 @@ static idx_t gen_symbol(gen_sym *dst, ssa_sym *src, allocator *a)
 			case SSA_CALL:
 				{
 				*p++ = 0xe8;
-				idx_t offset = dyn_arr_size(&ins) + 1;
-				idx_pair r = { .lo=offset, .hi=locals[i->L] };
+				idx_t offset = dyn_arr_size(&ins) + 1; // for the e8 byte
+				gen_reloc r = { .offset=offset, .symref=locals[i->L] };
 				dyn_arr_push(&refs, &r, sizeof r, a);
 				p = imm32(p, 0);
 				p = store(p, RAX, locals[i->to], 32);
 				}
 				break;
 			case SSA_GLOBAL_REF:
-				locals[i->to] = i[1].v;
-				i++;
+				locals[i->to] = i->L;
 				break;
 			case SSA_RET:
 				p = load(p, RAX, locals[i->to], 32);
 				p = addsubimm(p, RSP, stack_space, SSA_ADD, 64);
 				p = pop64(p, RBP);
 				*p++ = 0xc3;
-				break;
-			case SSA_PROLOGUE:
-				// p = endbr64(p);
-				p = push64(p, RBP);
-				p = addsubimm(p, RSP, stack_space, SSA_SUB, 64);
-				p = mov(p, RBP, RSP, 64);
 				break;
 			default:
 				assert(0);
@@ -273,9 +283,9 @@ static idx_t gen_symbol(gen_sym *dst, ssa_sym *src, allocator *a)
 	}
 
 	byte *base = ins.buf.addr;
-	for (idx_pair *reloc = label_relocs.buf.addr, *end = label_relocs.end;
+	for (gen_reloc *reloc = label_relocs.buf.addr, *end = label_relocs.end;
 			reloc != end; reloc++) {
-		base[reloc->lo] = labels[reloc->hi] - reloc->lo - 4;
+		base[reloc->offset] = labels[reloc->symref] - reloc->offset - 4;
 	}
 	
 	dyn_arr_fini(&label_relocs, a);
@@ -285,25 +295,31 @@ static idx_t gen_symbol(gen_sym *dst, ssa_sym *src, allocator *a)
 	dst->refs = scratch_from(&refs, a, a);
 	return scratch_len(dst->ins);
 }
-#endif
 
-#if 0
-gen_module gen_x86_64(ssa_module m2ac, allocator *a)
+gen_module gen_x86_64(ir3_module m2ac, allocator *a)
 {
 	gen_module out;
 	out.code_size = 0;
 	out.num_refs = 0;
 	dyn_arr dest, refs;
 	dyn_arr_init(&dest, 0*sizeof(gen_sym), a);
-	dyn_arr_init(&refs, 0*sizeof(idx_pair), a);
-	for (ssa_sym *prev = scratch_start(m2ac), *end = scratch_end(m2ac);
+	dyn_arr_init(&refs, 0*sizeof(gen_reloc), a);
+	for (ir3_func *prev = scratch_start(m2ac), *end = scratch_end(m2ac);
 			prev != end; prev++) {
-		gen_sym *next = dyn_arr_push(&dest, NULL, sizeof *next, a);
-		out.code_size += gen_symbol(next, prev, a);
-		out.num_refs  += scratch_len(next->refs) / sizeof(idx_pair);
+		gen_sym *new = dyn_arr_push(&dest, NULL, sizeof *new, a);
+		out.code_size += gen_symbol(new, prev, a);
+		out.num_refs  += scratch_len(new->refs) / sizeof(gen_reloc);
 	}
 	out.syms = scratch_from(&dest, a, a);
 	return out;
 }
-#endif
+
+void gen_fini(gen_module *mod, allocator *a)
+{
+	for (gen_sym *sym = scratch_start(mod->syms); sym != scratch_end(mod->syms); sym++) {
+		scratch_fini(sym->ins, a);
+		scratch_fini(sym->refs, a);
+	}
+	scratch_fini(mod->syms, a);
+}
 

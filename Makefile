@@ -34,10 +34,11 @@ all: $(OUT)/$(TEST) $(OUT)/$(BIN) dump
 test: $(OUT)/$(TEST)
 	$<
 
+GEN = basic.o
 dump: $(OUT)/$(TEST)
 	$<
-	objdump -Dwr -Mintel --insn-width=6 basic.o
-	ld rt.o basic.o
+	objdump -Dwr -Mintel --insn-width=6 $(GEN)
+	ld rt.o $(GEN)
 	./a.out
 
 $(OUT)/$(TEST): $(OUT)/$(TEST).o $(OBJ)
