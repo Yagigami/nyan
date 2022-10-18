@@ -107,6 +107,7 @@ static byte *mov(byte *p, enum x86_64_reg L, enum x86_64_reg R, int bits)
 	return p;
 }
 
+// little endian, just lazy to write 4 imm8 calls
 static byte *endbr64(byte *p) { return imm32(p, 0xfa1e0ff3); }
 
 static byte *mov_imm32(byte *p, enum x86_64_reg r, idx_t imm)
@@ -139,8 +140,13 @@ static byte *setcc_mem(byte *p, idx_t offset, enum ssa_branch_cc cc)
 {
 	*p++ = 0x0f;
 	*p++ = 0x90 | bc2cc[cc];
-	*p++ = modrm(2, RBP, 0);
-	return imm32(p, offset);
+	if (-0x80 <= offset && offset < 0x80) {
+		*p++ = modrm(1, RBP, 0);
+		return imm8(p, offset);
+	} else {
+		*p++ = modrm(2, RBP, 0);
+		return imm32(p, offset);
+	}
 }
 
 #define ALIGN(N,A) (((N)+(A)-1)/(A)*(A))

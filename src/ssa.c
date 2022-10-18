@@ -34,7 +34,6 @@ static const local_info linfo_unk   = LINFO(0, 0, SSAT_NONE );
 
 typedef struct map_stack {
 	map ast2num;
-	scope *scope;
 	struct map_stack *next;
 } map_stack;
 
@@ -53,7 +52,7 @@ case EXPR_INT:
 	number = new_local(&f->locals, linfo_int32, a);
 	assert(e->value <= (ssa_extension)-1);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_IMM, number }, sizeof(ssa_instr), a);
-	// just little endian things
+	// just little endian things // btw this is undefined behavior
 	dyn_arr_push(&f->ins, &e->value, sizeof(ssa_extension), a);
 	return number;
 case EXPR_BOOL:
@@ -73,7 +72,7 @@ case EXPR_NAME:
 		ent = map_find(&it->ast2num, name, h, _string_cmp2);
 	}
 	if (!it->next) { // this is a global scope reference -> it gets referenced in a local
-		number = new_local(&f->locals, linfo_int32, a);
+		number = new_local(&f->locals, linfo_unk, a);
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_GLOBAL_REF, number, ent->v }, sizeof(ssa_instr), a);
 		ent = map_add(&stk->ast2num, name, intern_hash, a);
 		ent->k = name;
@@ -133,25 +132,25 @@ static void ir3_decl(ir3_func *f, decl_idx i, map_stack *stk, allocator *a)
 {
 	decl *d = idx2decl(i);
 	switch (d->kind) {
-	case DECL_VAR:
-		{
-		ssa_ref val = ir3_expr(f, d->var_d.init, stk, a);
-		assert(!map_find(&stk->ast2num, d->name, intern_hash(d->name), _string_cmp2));
-		map_entry *e = map_add(&stk->ast2num, d->name, intern_hash, a);
-		e->k = d->name;
-		ssa_ref number = dyn_arr_size(&f->locals)/sizeof(local_info);
-		dyn_arr_push(&f->locals, d->type->name == tokens.kw_int32?
-				&linfo_int32: &linfo_bool, sizeof linfo_int32, a);
-		e->v = number;
-		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_COPY, number, val }, sizeof(ssa_instr), a);
-		}
-		break;
-	default:
-		__builtin_unreachable();
+case DECL_VAR:
+	{
+	ssa_ref val = ir3_expr(f, d->var_d.init, stk, a);
+	assert(!map_find(&stk->ast2num, d->name, intern_hash(d->name), _string_cmp2));
+	map_entry *e = map_add(&stk->ast2num, d->name, intern_hash, a);
+	e->k = d->name;
+	ssa_ref number = dyn_arr_size(&f->locals)/sizeof(local_info);
+	dyn_arr_push(&f->locals, d->type->name == tokens.kw_int32?
+			&linfo_int32: &linfo_bool, sizeof linfo_int32, a);
+	e->v = number;
+	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_COPY, number, val }, sizeof(ssa_instr), a);
 	}
+	break;
+default:
+	__builtin_unreachable();
+}
 }
 
-static void ir3_stmt(ir3_func *f, stmt *s, map_stack *stk, scope **blk, allocator *a)
+static void ir3_stmt(ir3_func *f, stmt *s, map_stack *stk, allocator *a)
 {
 	switch (s->kind) {
 	ssa_instr buf[2];
@@ -185,7 +184,7 @@ case STMT_IFELSE:
 
 	ir3_node *then_n = dyn_arr_push(&f->nodes, NULL, sizeof *then_n, a);
 	then_n->begin = then_n[-1].end = dyn_arr_size(&f->ins);
-	ir3_stmt(f, s->ifelse.s_then, stk, blk, a);
+	ir3_stmt(f, s->ifelse.s_then, stk, a);
 	buf[0].kind = SSA_GOTO;
 	ssa_instr *then_i = dyn_arr_push(&f->ins, buf, sizeof *buf, a);
 	idx_t then_i_idx = (void*) then_i - f->ins.buf.addr;
@@ -197,7 +196,7 @@ case STMT_IFELSE:
 		br->R = dyn_arr_size(&f->nodes)/sizeof(ir3_node);
 		ir3_node *else_n = dyn_arr_push(&f->nodes, NULL, sizeof *else_n, a);
 		else_n[-1].end = else_n->begin = dyn_arr_size(&f->ins);
-		ir3_stmt(f, s->ifelse.s_else, stk, blk, a);
+		ir3_stmt(f, s->ifelse.s_else, stk, a);
 		else_i = dyn_arr_push(&f->ins, buf, sizeof *buf, a);
 		else_i_idx = (void*) else_i - f->ins.buf.addr;
 	}
@@ -219,11 +218,10 @@ case STMT_IFELSE:
 
 case STMT_BLOCK:
 	{
-	scope *sub = scratch_start(blk[0]->sub);
-	map_stack top = { .scope=(*blk)++, .next=stk };
+	map_stack top = { .next=stk };
 	map_init(&top.ast2num, 0, a);
 	for (stmt **iter = scratch_start(s->blk), **end = scratch_end(s->blk); iter != end; iter++) {
-		ir3_stmt(f, *iter, &top, &sub, a);
+		ir3_stmt(f, *iter, &top, a);
 	}
 	map_fini(&top.ast2num, a);
 	break;
@@ -233,18 +231,17 @@ default:
 	}
 }
 
-static void ir3_decl_func(ir3_func *f, decl *d, map_stack *stk, scope** fsc, allocator *a)
+static void ir3_decl_func(ir3_func *f, decl *d, map_stack *stk, allocator *a)
 {
 	dyn_arr_init(&f->ins, 0, a);
 	dyn_arr_init(&f->nodes, 0, a);
 	ir3_node *first = dyn_arr_push(&f->nodes, NULL, sizeof *first, a);
 	first->begin = 0; // end will be set by the next time something is pushed, and one last time at the end
 	dyn_arr_init(&f->locals, 0, a);
-	scope *sub = scratch_start(fsc[0]->sub);
-	map_stack top = { .scope=(*fsc)++, .next=stk };
+	map_stack top = { .next=stk };
 	map_init(&top.ast2num, 0, a);
 	for (stmt **iter = scratch_start(d->func_d.body), **end = scratch_end(d->func_d.body); iter != end; iter++) {
-		ir3_stmt(f, *iter, &top, &sub, a);
+		ir3_stmt(f, *iter, &top, a);
 	}
 	map_fini(&top.ast2num, a);
 	ir3_node *last = f->nodes.end - sizeof *last;
@@ -267,13 +264,12 @@ static map_entry global_name(ident_t name, size_t len, allocator *a)
 	return r;
 }
 
-ir3_module convert_to_3ac(module_t ast, scope *enclosing, dyn_arr *globals, allocator *a)
+ir3_module convert_to_3ac(module_t ast, dyn_arr *globals, allocator *a)
 {
 	dyn_arr funcs;
 	dyn_arr_init(&funcs, 0, a);
-	map_stack bottom = { .scope=enclosing, .next=NULL };
+	map_stack bottom = { .next=NULL };
 	map_init(&bottom.ast2num, 0, a);
-	scope *fsc = scratch_start(enclosing->sub);
 	for (decl_idx *start = scratch_start(ast), *end = scratch_end(ast),
 			*iter = start; iter != end; iter++) {
 		decl *d = idx2decl(*iter);
@@ -284,7 +280,7 @@ ir3_module convert_to_3ac(module_t ast, scope *enclosing, dyn_arr *globals, allo
 		map_entry global = global_name(d->name, ident_len(d->name), a);
 		dyn_arr_push(globals, &global, sizeof global, a);
 		ir3_decl_func(dyn_arr_push(&funcs, NULL, sizeof(ir3_func), a),
-				d, &bottom, &fsc, a);
+				d, &bottom, a);
 	}
 	map_fini(&bottom.ast2num, a);
 	return scratch_from(&funcs, a, a);
@@ -373,12 +369,12 @@ void test_3ac(void)
 	resolve_refs(module, &global, ast.temps, &perma.base);
 	type_check(module, &global);
 	token_fini();
+	scope_fini(&global, ast.temps);
 
 	if (!ast.errors) {
 		dyn_arr names; dyn_arr_init(&names, 0, gpa);
-		ir3_module m3ac = convert_to_3ac(module, &global, &names, gpa);
+		ir3_module m3ac = convert_to_3ac(module, &names, gpa);
 		map_fini(&tokens.idents, tokens.up);
-		scope_fini(&global, ast.temps);
 		allocator_geom_fini(&perma);
 		allocator_geom_fini(&just_ast);
 		ast_fini(gpa);

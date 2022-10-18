@@ -27,14 +27,13 @@ enum ssa_opcode
 	SSA_RET,
 	SSA_BOOL, // the value is embedded in the L field
 	SSA_LABEL,
-	SSA_SET, // set(cc) dst, lhs, rhs // 1 ext
-	// SSA_BOOL_NEG,
+	SSA_SET, // set(cc) dst, lhs, rhs // 1 ext (.to = cc)
+	SSA_BOOL_NEG,
 	// SSA_PHI, // to = phi L R
-	// SSA_LABEL,
 	// if ever arises the need to traverse the cfg,
 	// change the goto/br format slightly to make that possible
 	SSA_GOTO,
-	SSA_BR, // br(cc) lhs, rhs, then, else // 1 extension
+	SSA_BR, // br(cc) lhs, rhs, then, else // 1 extension (.L=then, .R=else)
 
 	SSA_NUM
 };
@@ -72,7 +71,7 @@ typedef struct ir3_func {
 } ir3_func;
 
 typedef scratch_arr ir3_module;
-ir3_module convert_to_3ac(module_t ast, scope *enclosing, dyn_arr *globals, allocator *a);
+ir3_module convert_to_3ac(module_t ast, dyn_arr *globals, allocator *a);
 ir3_module convert_to_2ac(ir3_module m3ac, allocator *a);
 
 int dump_3ac(ir3_module m, map_entry *globals);
