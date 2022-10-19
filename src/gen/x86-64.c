@@ -30,55 +30,64 @@ static byte *imm16(byte *p, uint16_t i) { return imm8(imm8(p, i & 0xff), i >> 8)
 static byte *imm32(byte *p, uint32_t i) { return imm16(imm16(p, i & 0xffff), i >> 16); }
 // static byte *imm64(byte *p, uint64_t i) { return imm32(imm32(p, i & 0xffffffff), i >> 32); }
 
-static byte *load(byte *p, enum x86_64_reg to, idx_t offset, int bits)
+static byte *emit_disp(byte *p, enum x86_64_reg r, enum x86_64_reg base, idx_t offset)
 {
-	byte opcode = bits != 8? 0x8b: 0x8a;
-	if (bits == 16) *p++ = OP_SIZE_OVERRIDE;
-	if (bits == 64 || to >= R8) *p++ = rex(bits==64, to>>3, 0, 0);
-	*p++ = opcode;
 	if (-0x80 <= offset && offset < 0x80) {
-		*p++ = modrm(1, RBP, to);
+		*p++ = modrm(1, base, r);
 		return imm8(p, offset);
 	} else {
-		*p++ = modrm(2, RBP, to);
+		*p++ = modrm(2, base, r);
 		return imm32(p, offset);
 	}
 }
 
-static byte *store(byte *p, enum x86_64_reg from, idx_t offset, int bits)
+static byte *override_if16b(byte *p, int bytes)
 {
-	byte opcode = bits != 8? 0x89: 0x88;
-	if (bits == 16) *p++ = OP_SIZE_OVERRIDE;
-	if (bits == 64 || from >= R8) *p++ = rex(bits==64, from>>3, 0, 0);
-	*p++ = opcode;
-	if (-0x80 <= offset && offset < 0x80) {
-		*p++ = modrm(1, RBP, from);
-		return imm8(p, offset);
-	} else {
-		*p++ = modrm(2, RBP, from);
-		return imm32(p, offset);
-	}
+	if (bytes == 2) *p++ = OP_SIZE_OVERRIDE;
+	return p;
 }
 
-static byte *addsub(byte *p, enum x86_64_reg L, enum x86_64_reg R, enum ssa_opcode opc, int bits)
+static byte opcode_anysize(byte opcode, int bytes)
+{
+	if (bytes == 1) opcode--;
+	return opcode;
+}
+
+static byte *load(byte *p, enum x86_64_reg to, idx_t offset, int bytes)
+{
+	override_if16b(p, bytes);
+	if (bytes == 8 || to >= R8) *p++ = rex(bytes==8, to>>3, 0, 0);
+	*p++ = opcode_anysize(0x8b, bytes);
+	return emit_disp(p, to, RBP, offset);
+}
+
+static byte *store(byte *p, enum x86_64_reg from, idx_t offset, int bytes)
+{
+	override_if16b(p, bytes);
+	if (bytes == 8 || from >= R8) *p++ = rex(bytes==8, from>>3, 0, 0);
+	*p++ = opcode_anysize(0x89, bytes);
+	return emit_disp(p, from, RBP, offset);
+}
+
+static byte *addsub(byte *p, enum x86_64_reg L, enum x86_64_reg R, enum ssa_opcode opc, int bytes)
 {
 	byte opcode = opc == SSA_ADD? 0x01: opc == SSA_SUB? 0x29: -1;
-	if (bits == 64 || L >= R8 || R >= R8) *p++ = rex(bits==64, R>>3, 0, L>>3);
-	*p++ = opcode;
+	if (bytes == 8 || L >= R8 || R >= R8) *p++ = rex(bytes==8, R>>3, 0, L>>3);
+	*p++ = opcode_anysize(opcode, bytes);
 	*p++ = modrm(3, L, R);
 	return p;
 }
 
-static byte *addsubimm(byte *p, enum x86_64_reg r, idx_t imm, enum ssa_opcode opc, int bits)
+static byte *addsubimm(byte *p, enum x86_64_reg r, idx_t imm, enum ssa_opcode opc, int bytes)
 {
 	byte opcode_ext = opc == SSA_ADD? 0: opc == SSA_SUB? 5: -1;
-	if (bits == 64 || r >= R8) *p++ = rex(bits==64, 0, 0, r>>3);
+	if (bytes == 8 || r >= R8) *p++ = rex(bytes==8, 0, 0, r>>3);
 	if (-0x80 <= imm && imm < 0x80) {
-		*p++ = 0x83;
+		*p++ = opcode_anysize(0x83, bytes);
 		*p++ = modrm(3, r, opcode_ext);
 		return imm8(p, imm);
 	} else {
-		*p++ = 0x81;
+		*p++ = opcode_anysize(0x81, bytes);
 		*p++ = modrm(3, r, opcode_ext);
 		return imm32(p, imm);
 	}
@@ -98,11 +107,11 @@ static byte *pop64(byte *p, enum x86_64_reg r)
 	return p;
 }
 
-static byte *mov(byte *p, enum x86_64_reg L, enum x86_64_reg R, int bits)
+static byte *mov(byte *p, enum x86_64_reg L, enum x86_64_reg R, int bytes)
 {
-	if (bits == 16) *p++ = OP_SIZE_OVERRIDE;
-	if (bits == 64 || L >= R8 || R >= R8) *p++ = rex(bits==64, L>>3, 0, R>>3);
-	*p++ = 0x8b;
+	override_if16b(p, bytes);
+	if (bytes == 8 || L >= R8 || R >= R8) *p++ = rex(bytes==8, L>>3, 0, R>>3);
+	*p++ = opcode_anysize(0x8b, bytes);
 	*p++ = modrm(3, R, L);
 	return p;
 }
@@ -140,13 +149,7 @@ static byte *setcc_mem(byte *p, idx_t offset, enum ssa_branch_cc cc)
 {
 	*p++ = 0x0f;
 	*p++ = 0x90 | bc2cc[cc];
-	if (-0x80 <= offset && offset < 0x80) {
-		*p++ = modrm(1, RBP, 0);
-		return imm8(p, offset);
-	} else {
-		*p++ = modrm(2, RBP, 0);
-		return imm32(p, offset);
-	}
+	return emit_disp(p, 0, RBP, offset);
 }
 
 #define ALIGN(N,A) (((N)+(A)-1)/(A)*(A))
@@ -173,21 +176,24 @@ idx_t *gen_lalloc(dyn_arr *locals, idx_t *out_stack_space, allocation *to_free, 
 	return local_offsets;
 }
 
-static byte *cmp(byte *p, enum x86_64_reg L, enum x86_64_reg R, int bits)
+static byte *cmp(byte *p, enum x86_64_reg L, enum x86_64_reg R, int bytes)
 {
-	if (bits == 64 || L >= R8 || R >= R8) *p++ = rex(bits==64, R>>3, 0, L>>3);
-	*p++ = 0x39;
+	if (bytes == 8 || L >= R8 || R >= R8) *p++ = rex(bytes==8, R>>3, 0, L>>3);
+	*p++ = opcode_anysize(0x39, bytes);
 	*p++ = modrm(3, L, R);
 	return p;
 }
 
-static byte *test(byte *p, enum x86_64_reg L, enum x86_64_reg R, int bits)
+static byte *test(byte *p, enum x86_64_reg L, enum x86_64_reg R, int bytes)
 {
-	if (bits == 64 || L >= R8 || R >= R8) *p++ = rex(bits==64, R>>3, 0, L>>3);
-	*p++ = 0x85;
+	if (bytes == 8 || L >= R8 || R >= R8) *p++ = rex(bytes==8, R>>3, 0, L>>3);
+	*p++ = opcode_anysize(0x85, bytes);
 	*p++ = modrm(3, L, R);
 	return p;
 }
+
+// FIXME: handle more than 6 args
+static const enum x86_64_reg sysv_arg[6] = { RDI, RSI, RDX, RCX, R8, R9 };
 
 static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 {
@@ -200,33 +206,39 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 	idx_t *labels = ta2.addr;
 	idx_t stack_space;
 	idx_t *locals = gen_lalloc(&src->locals, &stack_space, &temp_alloc, a);
+	local_info *linfo = src->locals.buf.addr;
 
 	byte buf[64], *p = buf;
 	// p = endbr64(p);
 	p = push64(p, RBP);
-	p = addsubimm(p, RSP, stack_space, SSA_SUB, 64);
-	p = mov(p, RBP, RSP, 64);
+	p = addsubimm(p, RSP, stack_space, SSA_SUB, 8);
+	p = mov(p, RBP, RSP, 8);
 	dyn_arr_push(&ins, buf, p-buf, a);
 	for (ssa_instr *start = src->ins.buf.addr, *end = src->ins.end,
 			*i = start; i != end; i++) {
 		p = buf;
 		switch (i->kind) {
+			int width;
 			case SSA_GOTO:
 				*p++ = 0xe9;
 				dyn_arr_push(&label_relocs, &(gen_reloc){ .offset=dyn_arr_size(&ins) + 1, .symref=i->to }, sizeof(gen_reloc), a);
 				p = imm32(p, 0);
 				break;
+
 			case SSA_SET:
-				p = load(p, RAX, locals[i->L], 32);
-				p = load(p, RCX, locals[i->R], 32);
-				p = cmp(p, RAX, RCX, 32);
+				width = LINFO_GET_SIZE(linfo[i->L]);
+				p = load(p, RAX, locals[i->L], width);
+				p = load(p, RCX, locals[i->R], width);
+				p = cmp(p, RAX, RCX, width);
 				p = setcc_mem(p, locals[i->to], i[1].to);
 				i++;
 				break;
+
 			case SSA_BR:
-				p = load(p, RAX, locals[i->L], 32);
-				p = load(p, RCX, locals[i->R], 32);
-				p = cmp(p, RAX, RCX, 32);
+				width = LINFO_GET_SIZE(linfo[i->L]);
+				p = load(p, RAX, locals[i->L], width);
+				p = load(p, RCX, locals[i->R], width);
+				p = cmp(p, RAX, RCX, width);
 				*p++ = 0x0f;
 				*p++ = 0x80 | bc2cc[i->to];
 				{
@@ -236,51 +248,84 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 				p = imm32(p, 0);
 				i++;
 				break;
+
 			case SSA_COPY:
-				p = load(p, RAX, locals[i->L], 32);
-				p = store(p, RAX, locals[i->to], 32);
+				width = LINFO_GET_SIZE(linfo[i->L]);
+				p = load(p, RAX, locals[i->L], width);
+				p = store(p, RAX, locals[i->to], width);
 				break;
+
 			case SSA_LABEL:
 				labels[i->to] = dyn_arr_size(&ins);
 				break;
+
 			case SSA_BOOL:
 				p = store_imm8(p, locals[i->to], i->L);
 				break;
+
 			case SSA_BOOL_NEG:
-				p = load(p, RDX, locals[i->R], 8);
-				p = test(p, RDX, RDX, 32);
+				width = LINFO_GET_SIZE(linfo[i->R]);
+				p = load(p, RDX, locals[i->R], width);
+				p = test(p, RDX, RDX, width);
 				p = setcc_mem(p, locals[i->to], SSAB_NE);
 				break;
+
 			case SSA_IMM:
+				width = LINFO_GET_SIZE(linfo[i->to]);
 				p = mov_imm32(p, RAX, i[1].v);
-				p = store(p, RAX, locals[i->to], 32);
+				p = store(p, RAX, locals[i->to], width);
 				i++; // because of the extension
 				break;
+				
 			case SSA_ADD: case SSA_SUB:
-				p = load(p, RAX, locals[i->to], 32);
-				p = load(p, RDX, locals[i->R ], 32);
-				p = addsub(p, RAX, RDX, i->kind, 32);
-				p = store(p, RAX, locals[i->to], 32);
+				width = LINFO_GET_SIZE(linfo[i->to]);
+				p = load(p, RAX, locals[i->to], width);
+				p = load(p, RDX, locals[i->R ], width);
+				p = addsub(p, RAX, RDX, i->kind, width);
+				p = store(p, RAX, locals[i->to], width);
 				break;
+
 			case SSA_CALL:
 				{
+				assert(i->R < 6);
+				idx_t ratio = sizeof(ssa_extension) / sizeof(ssa_ref);
+				idx_t num_ext = (i->R + ratio - 1) / ratio;
+				// little endian things
+				for (ssa_ref arg = 0; arg < i->R; arg++) {
+					ssa_extension ext = i[1 + arg/ratio].v;
+					idx_t shift = 8 * (arg % ratio);
+					ssa_ref id = (ext >> shift) & ((1L << (8 * sizeof id)) - 1);
+					p = load(p, sysv_arg[arg], locals[id], LINFO_GET_SIZE(linfo[id]));
+				}
 				*p++ = 0xe8;
-				idx_t offset = dyn_arr_size(&ins) + 1; // for the e8 byte
+				idx_t offset = dyn_arr_size(&ins) + p - buf;
 				gen_reloc r = { .offset=offset, .symref=locals[i->L] };
 				dyn_arr_push(&refs, &r, sizeof r, a);
 				p = imm32(p, 0);
-				p = store(p, RAX, locals[i->to], 32);
+				p = store(p, RAX, locals[i->to], LINFO_GET_SIZE(linfo[i->to]));
+				i += num_ext;
 				}
 				break;
+
 			case SSA_GLOBAL_REF:
 				locals[i->to] = i->L;
 				break;
+
 			case SSA_RET:
-				p = load(p, RAX, locals[i->to], 32);
-				p = addsubimm(p, RSP, stack_space, SSA_ADD, 64);
+				width = LINFO_GET_SIZE(linfo[i->to]);
+				p = load(p, RAX, locals[i->to], width);
+				p = addsubimm(p, RSP, stack_space, SSA_ADD, 8);
 				p = pop64(p, RBP);
 				*p++ = 0xc3;
 				break;
+
+			case SSA_ARG:
+				assert(i->L < 6);
+				width = LINFO_GET_SIZE(linfo[i->to]);
+				// sysV abi: int registers rdi>rsi>rdx>rcx>r8>r9
+				p = store(p, sysv_arg[i->L], locals[i->to], width);
+				break;
+
 			default:
 				assert(0);
 		}

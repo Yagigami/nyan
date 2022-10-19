@@ -2,6 +2,7 @@
 #define CROUTE_ALLOC_H
 
 #include <stddef.h>
+#include <stdalign.h>
 
 
 typedef struct allocation {

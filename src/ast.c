@@ -100,8 +100,11 @@ expr *parse_expr_postfix(allocator *up)
 		expr *call = ALLOC(up, sizeof *call, 8).addr;
 		call->pos = token_pos();
 		dyn_arr_init(&args, 0*sizeof(expr), ast.temps);
+		int num_args = 0;
 		while (!token_match(')')) {
-			assert(0 && "not implemented");
+			if (num_args++ && !token_expect(',')) break;
+			expr *arg = parse_expr(up);
+			dyn_arr_push(&args, &arg, sizeof arg, ast.temps);
 		}
 		call->kind = EXPR_CALL;
 		call->call.operand = operand;
@@ -191,11 +194,9 @@ type_t *parse_type_prim(allocator *up)
 	if (token_match_kw(tokens.kw_func)) {
 		prim->kind = TYPE_FUNC;
 	} else if (token_match_kw(tokens.kw_int32)) {
-		prim->kind = TYPE_PRIMITIVE;
-		prim->name = tokens.kw_int32;
+		prim->kind = TYPE_INT32;
 	} else if (token_match_kw(tokens.kw_bool)) {
-		prim->kind = TYPE_PRIMITIVE;
-		prim->name = tokens.kw_bool;
+		prim->kind = TYPE_BOOL;
 	} else {
 		if (!expect_or(false, token_pos(), "unknown type ", tokens.current, "\n"))
 			token_skip_to_newline();
@@ -218,11 +219,11 @@ type_t *parse_type(allocator *up)
 		dyn_arr params;
 		dyn_arr_init(&params, 0*sizeof(func_arg), ast.temps);
 		parse_type_params(&params, up);
-		t->func_t.params = scratch_from(&params, ast.temps, up);
 		if (!token_expect(':')) {
 			dyn_arr_fini(&params, ast.temps);
 			goto err;
 		}
+		t->func_t.params = scratch_from(&params, ast.temps, up);
 		t->func_t.ret_t = parse_type(up);
 	}
 	return t;
@@ -331,8 +332,10 @@ void test_ast(void)
 	module_t module = parse_module(&perma.base);
 	scope global;
 	resolve_refs(module, &global, ast.temps, &perma.base);
-	type_check(module, &global);
+	map e2t;
+	type_check(module, &global, &e2t, gpa);
 
+	map_fini(&e2t, gpa);
 	scope_fini(&global, gpa);
 	token_fini();
 	map_fini(&tokens.idents, gpa);

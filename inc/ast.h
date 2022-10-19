@@ -15,10 +15,16 @@ typedef idx_t decl_idx;
 
 typedef enum type_kind {
 	TYPE_NONE,
-	TYPE_PRIMITIVE,
+
+	TYPE_INT32,
+	TYPE_PRIMITIVE_BEGIN = TYPE_INT32,
+	TYPE_BOOL,
+	TYPE_PRIMITIVE_END = TYPE_BOOL,
+
 	TYPE_FUNC,
+	TYPE_CHAINED = TYPE_FUNC,
 	
-	TYPE_END = TYPE_FUNC
+	TYPE_NUM
 } type_kind;
 
 typedef enum decl_kind {
@@ -59,7 +65,6 @@ struct type_t;
 
 typedef struct type_t {
 	union {
-		ident_t name;
 		struct {
 			// func_arg array
 			scratch_arr params;
@@ -100,7 +105,6 @@ typedef scratch_arr stmt_block; // array of stmt*
 typedef struct decl {
 	ident_t name;
 	type_t *type;
-	source_idx pos;
 	union {
 		struct {
 			expr *init;
@@ -110,6 +114,7 @@ typedef struct decl {
 		} func_d;
 	};
 	decl_kind kind;
+	source_idx pos;
 } decl;
 
 typedef struct stmt {

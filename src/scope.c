@@ -56,7 +56,7 @@ static void resolve_simple_decl(decl_idx i, scope_stack_l *list, allocator *up, 
 	if (!expect_or(inserted,
 		d->pos, "the symbol ", d->name, " redefines",
 		scope2decl(e->v)->pos  , "in the same scope.\n")) return;
-	e->v = i;
+	e->v = (val_t) d->type;
 	switch (d->kind) {
 	case DECL_VAR:
 		resolve_expr(d->var_d.init, list, up, final);
@@ -113,10 +113,29 @@ void resolve_stmt(stmt *s, dyn_arr *add_subscopes, scope_stack_l *list, allocato
 	}
 }
 
-static void resolve_func(decl *f, dyn_arr *add_subscopes, scope_stack_l *list, allocator *up, allocator *final)
+static void resolve_func(decl_idx i, dyn_arr *add_subscopes, scope_stack_l *list, allocator *up, allocator *final)
 {
-	assert(f->type->func_t.params == NULL);
-	resolve_stmt_block(f->func_d.body, add_subscopes, list, up, final);
+	decl *f = idx2decl(i);
+	scope *new = dyn_arr_push(add_subscopes, NULL, sizeof *new, up);
+	scope_stack_l top = { .scope=new, .next=list };
+	map_init(&new->refs, 2, up);
+	for (func_arg *arg = scratch_start(f->type->func_t.params); arg != scratch_end(f->type->func_t.params); arg++) {
+		if (!expect_or(arg->type->kind != TYPE_FUNC,
+			f->pos, "you cannot pass a function as a value.\n")) continue;
+		bool inserted;
+		map_entry *e = map_id(&new->refs, arg->name, intern_hash, _string_cmp2, &inserted, up);
+		if (!expect_or(inserted,
+			f->pos, "the symbol ", arg->name, " redefines",
+			scope2decl(e->v)->pos, "in the same scope.\n")) continue;
+		e->v = (val_t) arg->type;
+	}
+
+	dyn_arr subs; dyn_arr_init(&subs, 0, up);
+	stmt_block blk = f->func_d.body;
+	for (stmt **it = scratch_start(blk), **end = scratch_end(blk);
+			it != end; it++)
+		resolve_stmt(*it, &subs, &top, up, final);
+	new->sub = scratch_from(&subs, up, final);
 }
 
 void resolve_refs(module_t of, scope *to, allocator *up, allocator *final)
@@ -135,8 +154,8 @@ void resolve_refs(module_t of, scope *to, allocator *up, allocator *final)
 			if (!expect_or(inserted,
 				d->pos, "the symbol ", d->name, " is redeclared here.\n",
 				scope2decl(e->v)->pos, "it was previously declared here.\n")) continue;
-			e->v = *it;
-			resolve_func(d, &sub, &list, up, final);
+			e->v = (val_t) d->type;
+			resolve_func(*it, &sub, &list, up, final);
 		} else {
 			if (!expect_or(false, "non-function declaration at top-level not implemented.\n")) continue;
 		}

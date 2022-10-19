@@ -28,12 +28,21 @@ local_info ssa_linfo(idx_t size, size_t align, enum ssa_type type)
 	return LINFO(size, log2_align, type);
 }
 
-static const local_info linfo_int32 = LINFO(4, 2, SSAT_INT32);
-static const local_info linfo_bool  = LINFO(1, 0, SSAT_BOOL );
-static const local_info linfo_unk   = LINFO(0, 0, SSAT_NONE );
+static const local_info linfo_tbl[TYPE_NUM] = {
+	[TYPE_NONE] = LINFO(0, 0, SSAT_NONE),
+	[TYPE_INT32] = LINFO(4, 2, SSAT_INT32),
+	[TYPE_BOOL] = LINFO(1, 0, SSAT_BOOL),
+	[TYPE_FUNC] = LINFO(0, 0, SSAT_NONE),
+};
+
+static local_info type2linfo(type_t *type)
+{
+	return linfo_tbl[type->kind];
+}
 
 typedef struct map_stack {
 	map ast2num;
+	scope *scope;
 	struct map_stack *next;
 } map_stack;
 
@@ -44,19 +53,22 @@ static ssa_ref new_local(dyn_arr *locals, local_info linfo, allocator *a)
 	return num;
 }
 
-static ssa_ref ir3_expr(ir3_func *f, expr *e, map_stack *stk, allocator *a)
+static ssa_ref ir3_expr(ir3_func *f, expr *e, map *e2t, map_stack *stk, allocator *a)
 {
+	map_entry *asso = map_find(e2t, (key_t) e, intern_hash((key_t) e), _string_cmp2); assert(asso);
+	type_t *type = (type_t*) asso->v;
+	local_info linfo = type2linfo(type);
 	switch (e->kind) {
 	ssa_ref number;
 case EXPR_INT:
-	number = new_local(&f->locals, linfo_int32, a);
+	number = new_local(&f->locals, linfo, a);
 	assert(e->value <= (ssa_extension)-1);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_IMM, number }, sizeof(ssa_instr), a);
 	// just little endian things // btw this is undefined behavior
 	dyn_arr_push(&f->ins, &e->value, sizeof(ssa_extension), a);
 	return number;
 case EXPR_BOOL:
-	number = new_local(&f->locals, linfo_bool, a);
+	number = new_local(&f->locals, linfo, a);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_BOOL, number, e->name == tokens.kw_true }, sizeof(ssa_instr), a);
 	return number;
 	
@@ -72,7 +84,7 @@ case EXPR_NAME:
 		ent = map_find(&it->ast2num, name, h, _string_cmp2);
 	}
 	if (!it->next) { // this is a global scope reference -> it gets referenced in a local
-		number = new_local(&f->locals, linfo_unk, a);
+		number = new_local(&f->locals, linfo, a);
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_GLOBAL_REF, number, ent->v }, sizeof(ssa_instr), a);
 		ent = map_add(&stk->ast2num, name, intern_hash, a);
 		ent->k = name;
@@ -83,17 +95,44 @@ case EXPR_NAME:
 
 case EXPR_CALL:
 	{
-	ssa_ref func = ir3_expr(f, e->call.operand, stk, a);
-	number = new_local(&f->locals, linfo_int32, a);
-	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_CALL, number, func }, sizeof(ssa_instr), a);
+	ssa_ref func = ir3_expr(f, e->call.operand, e2t, stk, a);
+	idx_t num_args = scratch_len(e->call.args) / sizeof(expr*);
+	assert(num_args < (1L << (8*sizeof(ssa_ref))) - 1);
+	idx_t ratio = sizeof(ssa_extension) / sizeof(ssa_ref);
+	idx_t num_ext = (num_args + ratio - 1) / ratio;
+	allocation m = ALLOC(a, (1 + num_ext) * sizeof(ssa_instr), alignof(ssa_instr));
+	ssa_instr *instr = m.addr, *call=instr;
+	*instr++ = (ssa_instr){ .kind=SSA_CALL, -1, func, num_args };
+	// little endian things
+	ssa_ref buf[ratio];
+	expr **base = scratch_start(e->call.args);
+	idx_t arg, idx;
+	for (arg = 0, idx = 0; arg < num_args - ratio; arg++, idx %= ratio) {
+		// FIXME: not giving the right id, either here or in decode
+		buf[idx++] = ir3_expr(f, base[arg], e2t, stk, a);
+		if ((arg + ratio - 1) % ratio == 0)
+			memcpy(instr++, buf, sizeof buf);
+	}
+	// last iteration is special: must publish even if you have less arguments
+#ifndef NDEBUG
+	memset(buf, -1, sizeof buf);
+#endif
+	for (; arg < num_args; arg++)
+		buf[idx++] = ir3_expr(f, base[arg], e2t, stk, a);
+	if (num_args)
+		memcpy(instr++, buf, sizeof buf);
+	// post after the arguments are evaluated
+	number = call->to = new_local(&f->locals, linfo, a);
+	dyn_arr_push(&f->ins, m.addr, (void*) instr - m.addr, a);
+	DEALLOC(a, m);
 	return number;
 	}
 
 case EXPR_ADD:
 	{
-	ssa_ref L = ir3_expr(f, e->binary.L, stk, a);
-	ssa_ref R = ir3_expr(f, e->binary.R, stk, a);
-	number = new_local(&f->locals, linfo_int32, a);
+	ssa_ref L = ir3_expr(f, e->binary.L, e2t, stk, a);
+	ssa_ref R = ir3_expr(f, e->binary.R, e2t, stk, a);
+	number = new_local(&f->locals, linfo, a);
 	token_kind op = e->binary.op;
 	enum ssa_opcode opc = 	op == '+' ? SSA_ADD:
 				op == '-' ? SSA_SUB:
@@ -104,16 +143,13 @@ case EXPR_ADD:
 
 case EXPR_CMP:
 	{
-	ssa_ref L = ir3_expr(f, e->binary.L, stk, a);
-	ssa_ref R = ir3_expr(f, e->binary.R, stk, a);
-	number = new_local(&f->locals, linfo_bool, a);
+	ssa_ref L = ir3_expr(f, e->binary.L, e2t, stk, a);
+	ssa_ref R = ir3_expr(f, e->binary.R, e2t, stk, a);
+	number = new_local(&f->locals, linfo, a);
 	token_kind op = e->binary.op;
-	enum ssa_branch_cc cc =	op == TOKEN_EQ ? SSAB_EQ:
-				op == TOKEN_NEQ? SSAB_NE:
-				op == '<'      ? SSAB_LT:
-				op == TOKEN_LEQ? SSAB_LE:
-				op == '>'      ? SSAB_GT:
-				op == TOKEN_GEQ? SSAB_GE:
+	enum ssa_branch_cc cc =	op == TOKEN_EQ ? SSAB_EQ: op == TOKEN_NEQ? SSAB_NE:
+				op == '<'      ? SSAB_LT: op == TOKEN_LEQ? SSAB_LE:
+				op == '>'      ? SSAB_GT: op == TOKEN_GEQ? SSAB_GE:
 				(assert(0), -1);
 	// wanted to work around adding this redundant SET instruction,
 	// but adding a jump in here while converting to a CFG will
@@ -128,19 +164,17 @@ default:
 	}
 }
 
-static void ir3_decl(ir3_func *f, decl_idx i, map_stack *stk, allocator *a)
+static void ir3_decl(ir3_func *f, decl_idx i, map *e2t, map_stack *stk, allocator *a)
 {
 	decl *d = idx2decl(i);
 	switch (d->kind) {
 case DECL_VAR:
 	{
-	ssa_ref val = ir3_expr(f, d->var_d.init, stk, a);
+	ssa_ref val = ir3_expr(f, d->var_d.init, e2t, stk, a);
 	assert(!map_find(&stk->ast2num, d->name, intern_hash(d->name), _string_cmp2));
 	map_entry *e = map_add(&stk->ast2num, d->name, intern_hash, a);
 	e->k = d->name;
-	ssa_ref number = dyn_arr_size(&f->locals)/sizeof(local_info);
-	dyn_arr_push(&f->locals, d->type->name == tokens.kw_int32?
-			&linfo_int32: &linfo_bool, sizeof linfo_int32, a);
+	ssa_ref number = new_local(&f->locals, type2linfo(d->type), a);
 	e->v = number;
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_COPY, number, val }, sizeof(ssa_instr), a);
 	}
@@ -150,30 +184,30 @@ default:
 }
 }
 
-static void ir3_stmt(ir3_func *f, stmt *s, map_stack *stk, allocator *a)
+static void ir3_stmt(ir3_func *f, stmt *s, map *e2t, map_stack *stk, scope **blk, allocator *a)
 {
 	switch (s->kind) {
 	ssa_instr buf[2];
 case STMT_DECL:
-	ir3_decl(f, s->d, stk, a);
+	ir3_decl(f, s->d, e2t, stk, a);
 	break;
 case STMT_ASSIGN:
 	{
-	ssa_ref R = ir3_expr(f, s->assign.R, stk, a);
-	ssa_ref L = ir3_expr(f, s->assign.L, stk, a);
+	ssa_ref R = ir3_expr(f, s->assign.R, e2t, stk, a);
+	ssa_ref L = ir3_expr(f, s->assign.L, e2t, stk, a);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_COPY, L, R }, sizeof(ssa_instr), a);
 	break;
 	}
 case STMT_RETURN:
 	{
-	ssa_ref ret = ir3_expr(f, s->e, stk, a);
+	ssa_ref ret = ir3_expr(f, s->e, e2t, stk, a);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_RET, ret }, sizeof(ssa_instr), a);
 	break;
 	}
 case STMT_IFELSE:
 	{
-	ssa_ref cond = ir3_expr(f, s->ifelse.cond, stk, a);
-	ssa_ref check = new_local(&f->locals, linfo_bool, a);
+	ssa_ref cond = ir3_expr(f, s->ifelse.cond, e2t, stk, a);
+	ssa_ref check = new_local(&f->locals, linfo_tbl[TYPE_BOOL], a);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_BOOL, check, 0 }, sizeof(ssa_instr), a);
 	buf[0] = (ssa_instr){ .kind=SSA_BR, SSAB_NE, cond, check };
 	buf[1] = (ssa_instr){ .v = -1 };
@@ -184,7 +218,7 @@ case STMT_IFELSE:
 
 	ir3_node *then_n = dyn_arr_push(&f->nodes, NULL, sizeof *then_n, a);
 	then_n->begin = then_n[-1].end = dyn_arr_size(&f->ins);
-	ir3_stmt(f, s->ifelse.s_then, stk, a);
+	ir3_stmt(f, s->ifelse.s_then, e2t, stk, blk, a);
 	buf[0].kind = SSA_GOTO;
 	ssa_instr *then_i = dyn_arr_push(&f->ins, buf, sizeof *buf, a);
 	idx_t then_i_idx = (void*) then_i - f->ins.buf.addr;
@@ -196,7 +230,7 @@ case STMT_IFELSE:
 		br->R = dyn_arr_size(&f->nodes)/sizeof(ir3_node);
 		ir3_node *else_n = dyn_arr_push(&f->nodes, NULL, sizeof *else_n, a);
 		else_n[-1].end = else_n->begin = dyn_arr_size(&f->ins);
-		ir3_stmt(f, s->ifelse.s_else, stk, a);
+		ir3_stmt(f, s->ifelse.s_else, e2t, stk, blk, a);
 		else_i = dyn_arr_push(&f->ins, buf, sizeof *buf, a);
 		else_i_idx = (void*) else_i - f->ins.buf.addr;
 	}
@@ -218,10 +252,11 @@ case STMT_IFELSE:
 
 case STMT_BLOCK:
 	{
-	map_stack top = { .next=stk };
+	scope *sub = scratch_start(blk[0]->sub);
+	map_stack top = { .scope=(*blk)++, .next=stk };
 	map_init(&top.ast2num, 0, a);
 	for (stmt **iter = scratch_start(s->blk), **end = scratch_end(s->blk); iter != end; iter++) {
-		ir3_stmt(f, *iter, &top, a);
+		ir3_stmt(f, *iter, e2t, &top, &sub, a);
 	}
 	map_fini(&top.ast2num, a);
 	break;
@@ -231,17 +266,28 @@ default:
 	}
 }
 
-static void ir3_decl_func(ir3_func *f, decl *d, map_stack *stk, allocator *a)
+static void ir3_decl_func(ir3_func *f, decl *d, map *e2t, map_stack *stk, scope** fsc, allocator *a)
 {
 	dyn_arr_init(&f->ins, 0, a);
 	dyn_arr_init(&f->nodes, 0, a);
 	ir3_node *first = dyn_arr_push(&f->nodes, NULL, sizeof *first, a);
 	first->begin = 0; // end will be set by the next time something is pushed, and one last time at the end
 	dyn_arr_init(&f->locals, 0, a);
-	map_stack top = { .next=stk };
+	scope *sub = scratch_start(fsc[0]->sub);
+	map_stack top = { .scope=(*fsc)++, .next=stk };
 	map_init(&top.ast2num, 0, a);
+	for (func_arg *start = scratch_start(d->type->func_t.params), *arg = start; arg != scratch_end(d->type->func_t.params); arg++) {
+		map_entry *e = map_add(&top.ast2num, arg->name, intern_hash, a);
+		e->k = arg->name;
+		e->v = arg - start;
+		local_info linfo = type2linfo(arg->type);
+		dyn_arr_push(&f->locals, &linfo, sizeof linfo, a);
+		// %2 = arg %2
+		// no real constraint for both to be the same
+		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ARG, arg - start, arg - start }, sizeof(ssa_instr), a);
+	}
 	for (stmt **iter = scratch_start(d->func_d.body), **end = scratch_end(d->func_d.body); iter != end; iter++) {
-		ir3_stmt(f, *iter, &top, a);
+		ir3_stmt(f, *iter, e2t, &top, &sub, a);
 	}
 	map_fini(&top.ast2num, a);
 	ir3_node *last = f->nodes.end - sizeof *last;
@@ -264,12 +310,13 @@ static map_entry global_name(ident_t name, size_t len, allocator *a)
 	return r;
 }
 
-ir3_module convert_to_3ac(module_t ast, dyn_arr *globals, allocator *a)
+ir3_module convert_to_3ac(module_t ast, scope *enclosing, map *e2t, dyn_arr *globals, allocator *a)
 {
 	dyn_arr funcs;
 	dyn_arr_init(&funcs, 0, a);
-	map_stack bottom = { .next=NULL };
+	map_stack bottom = { .scope=enclosing, .next=NULL };
 	map_init(&bottom.ast2num, 0, a);
+	scope *fsc = scratch_start(enclosing->sub);
 	for (decl_idx *start = scratch_start(ast), *end = scratch_end(ast),
 			*iter = start; iter != end; iter++) {
 		decl *d = idx2decl(*iter);
@@ -279,8 +326,8 @@ ir3_module convert_to_3ac(module_t ast, dyn_arr *globals, allocator *a)
 		e->v = iter-start;
 		map_entry global = global_name(d->name, ident_len(d->name), a);
 		dyn_arr_push(globals, &global, sizeof global, a);
-		ir3_decl_func(dyn_arr_push(&funcs, NULL, sizeof(ir3_func), a),
-				d, &bottom, a);
+		ir3_func *out = dyn_arr_push(&funcs, NULL, sizeof *out, a);
+		ir3_decl_func(out, d, e2t, &bottom, &fsc, a);
 	}
 	map_fini(&bottom.ast2num, a);
 	return scratch_from(&funcs, a, a);
@@ -305,12 +352,12 @@ static void ir2_decl_func(ir3_func *dst, ir3_func *src, allocator *a)
 			dyn_arr_push(&dst->ins, instr, sizeof *instr, a);
 			instr++;
 			/* fallthrough */
-		case SSA_CALL:
 		case SSA_COPY:
 		case SSA_BOOL:
 		case SSA_RET:
 		case SSA_GLOBAL_REF:
 		case SSA_GOTO:
+		case SSA_ARG:
 			dyn_arr_push(&dst->ins, instr, sizeof *instr, a);
 			break;
 		case SSA_ADD:
@@ -322,6 +369,14 @@ static void ir2_decl_func(ir3_func *dst, ir3_func *src, allocator *a)
 			dyn_arr_push(&dst->ins, &(ssa_instr){ .kind=SSA_BR, invert_cc[instr->to], instr->L, instr->R }, sizeof *instr, a);
 			dyn_arr_push(&dst->ins, &(ssa_instr){ .L=instr[1].R }, sizeof *instr, a);
 			instr++;
+			break;
+		case SSA_CALL:
+			{
+			idx_t ratio = sizeof(ssa_extension) / sizeof(ssa_ref);
+			idx_t num_ext = (instr->R + ratio - 1) / ratio;
+			dyn_arr_push(&dst->ins, instr, (1 + num_ext) * sizeof *instr, a);
+			instr += num_ext;
+			}
 			break;
 		default:
 			assert(0);
@@ -367,14 +422,16 @@ void test_3ac(void)
 	module_t module = parse_module(&just_ast.base);
 	scope global;
 	resolve_refs(module, &global, ast.temps, &perma.base);
-	type_check(module, &global);
+	map e2t;
+	type_check(module, &global, &e2t, gpa);
 	token_fini();
-	scope_fini(&global, ast.temps);
 
 	if (!ast.errors) {
 		dyn_arr names; dyn_arr_init(&names, 0, gpa);
-		ir3_module m3ac = convert_to_3ac(module, &names, gpa);
+		ir3_module m3ac = convert_to_3ac(module, &global, &e2t, &names, gpa);
+		map_fini(&e2t, gpa);
 		map_fini(&tokens.idents, tokens.up);
+		scope_fini(&global, ast.temps);
 		allocator_geom_fini(&perma);
 		allocator_geom_fini(&just_ast);
 		ast_fini(gpa);
@@ -382,8 +439,8 @@ void test_3ac(void)
 		print(stdout, "3-address code:\n");
 		dump_3ac(m3ac, names.buf.addr);
 		ir3_module m2ac = convert_to_2ac(m3ac, gpa);
-		print(stdout, "2-address code:\n");
-		dump_3ac(m2ac, names.buf.addr);
+		// print(stdout, "2-address code:\n");
+		// dump_3ac(m2ac, names.buf.addr);
 
 		gen_module gen = gen_x86_64(m2ac, gpa);
 		int e = elf_object_from(&gen, "basic.o", &names, gpa);

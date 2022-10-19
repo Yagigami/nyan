@@ -76,8 +76,6 @@ int token_init(const char *path, allocator *up, allocator *names)
 		KW(if);
 		KW(else);
 		KW(return);
-
-		INSERT(placeholder, "<missing>");
 		#undef KW
 		#undef INSERT
 
@@ -126,7 +124,7 @@ again:
 	CASE2('!', '=', TOKEN_NEQ);
 	#undef CASE2
 	case '+': case '-': // support += later
-	case ';': case ':': case '(': case ')': case '{': case '}': // always just 1 token
+	case ',': case ';': case ':': case '(': case ')': case '{': case '}': // always just 1 token
 		break;
 	case 'A' ... 'Z': case 'a' ... 'z': case '_':
 		next.kind = TOKEN_NAME;

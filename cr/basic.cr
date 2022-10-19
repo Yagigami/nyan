@@ -56,15 +56,6 @@ main func(): int32
 	return a;
 }
 
-entry func(): int32
-{
-	first :int32 = 3;
-	second :int32 = cap();
-	wow_this_name_is_extremely_long :int32 = first;
-	sum :int32 = (first) + second - 5;
-	return sum - cannot_alias_phi() - 2;
-}
-
 foo func(): int32
 {
 	r : int32 = 5;
@@ -121,5 +112,32 @@ scope2 func(): int32
 		return scope2();
 	}
 	return 4;
+}
+
+add1 func(x: int32): int32
+{
+	return x + 1;
+}
+
+add func(a: int32, b: int32): int32
+{
+	return a + b;
+}
+
+multiply func(a: int32, b: int32): int32
+{
+	if (b == 0)
+		return 0;
+	return a + multiply(a, b - 1);
+}
+
+entry func(): int32
+{
+	first :int32 = 3;
+	second :int32 = cap();
+	wow_this_name_is_extremely_long :int32 = first;
+	sum :int32 = (first) + second - 5;
+	zero: int32 = sum - cannot_alias_phi() - 2;
+	return zero + multiply(3+4, cap());
 }
 

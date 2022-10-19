@@ -21,7 +21,7 @@ enum ssa_opcode
 	SSA_NONE = 0,
 	SSA_IMM, // 1 extension // little endian
 	SSA_ADD, SSA_SUB,
-	SSA_CALL, // no args for now
+	SSA_CALL, // to = call L (R args, ...) // 1 extension / 4 args
 	SSA_GLOBAL_REF,
 	SSA_COPY,
 	SSA_RET,
@@ -34,6 +34,7 @@ enum ssa_opcode
 	// change the goto/br format slightly to make that possible
 	SSA_GOTO,
 	SSA_BR, // br(cc) lhs, rhs, then, else // 1 extension (.L=then, .R=else)
+	SSA_ARG,
 
 	SSA_NUM
 };
@@ -71,7 +72,7 @@ typedef struct ir3_func {
 } ir3_func;
 
 typedef scratch_arr ir3_module;
-ir3_module convert_to_3ac(module_t ast, dyn_arr *globals, allocator *a);
+ir3_module convert_to_3ac(module_t ast, scope *enclosing, map *e2t, dyn_arr *globals, allocator *a);
 ir3_module convert_to_2ac(ir3_module m3ac, allocator *a);
 
 int dump_3ac(ir3_module m, map_entry *globals);

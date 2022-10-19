@@ -72,13 +72,28 @@ static int fprint_ir3_instr(FILE *to, const ssa_instr *i, int *extra_offset, con
 	case SSA_BR:
 		*extra_offset = sizeof *i;
 		return fprintf(to, "br(%s) %%%hhx:%s, %%%hhx, L%hhx, L%hhx\n", opc2s[i->to], i->L, T, i->R, i[1].L, i[1].R);
+	case SSA_CALL:
+		{
+		int div = sizeof(ssa_extension)/sizeof(ssa_ref);
+		int num_ext = (i->R + div - 1) / div;
+		*extra_offset = num_ext * sizeof *i;
+		int printed = fprintf(to, "%%%hhx:%s = call %%%hhx [", i->to, T, i->L);
+		for (int arg = 0; arg < i->R; arg++) {
+			if (arg) printed += fprintf(to, ", ");
+			ssa_extension ext = i[1 + arg / div].v;
+			int shift = 8 * (arg % div);
+			ssa_ref id = (ext >> shift) & ((1L << (8 * sizeof id)) - 1);
+			printed += fprintf(to, "%%%hhx", id);
+		}
+		return printed + fprintf(to, "]\n");
+		}
+	case SSA_RET: return fprintf(to, "ret %%%hhx\n", i->to);
 	case SSA_GOTO: return fprintf(to, "goto L%hhx\n", i->to);
 	case SSA_LABEL: return fprintf(to, "label L%hhx\n", i->to);
-	case SSA_RET: return fprintf(to, "ret %%%hhx:%s\n", i->to, T);
+	case SSA_COPY: return fprintf(to, "%%%hhx = %%%hhx\n", i->to, i->L);
 	case SSA_BOOL: return fprintf(to, "%%%hhx:%s = %db\n", i->to, T, i->L);
-	case SSA_COPY: return fprintf(to, "%%%hhx:%s = %%%hhx\n", i->to, T, i->L);
-	case SSA_CALL: return fprintf(to, "%%%hhx:%s = call %%%hhx\n", i->to, T, i->L);
-	case SSA_GLOBAL_REF: return fprintf(to, "%%%hhx:%s = GLOBAL.%x\n", i->to, T, i->L);
+	case SSA_ARG: return fprintf(to, "%%%hhx:%s = args.%hhx\n", i->to, T, i->L);
+	case SSA_GLOBAL_REF: return fprintf(to, "%%%hhx:%s = global.%x\n", i->to, T, i->L);
 	case SSA_ADD: return fprintf(to, "%%%hhx:%s = add %%%hhx, %%%hhx\n", i->to, T, i->L, i->R);
 	case SSA_SUB: return fprintf(to, "%%%hhx:%s = sub %%%hhx, %%%hhx\n", i->to, T, i->L, i->R);
 	default:

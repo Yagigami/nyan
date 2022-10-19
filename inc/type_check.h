@@ -8,7 +8,7 @@
 
 typedef enum value_category { RVALUE, LVALUE } value_category;
 
-void type_check(module_t module, scope *top);
+void type_check(module_t module, scope *top, map *expr2type, allocator *up);
 
 #endif /* CROUTE_TYPE_CHECK_H */
 
