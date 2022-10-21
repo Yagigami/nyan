@@ -65,6 +65,7 @@ extern struct global_token_state {
 		kw_true,
 		kw_if,
 		kw_else,
+		kw_while,
 		kw_return;
 	const char *keywords_begin, *keywords_end;
 } tokens;

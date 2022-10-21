@@ -257,6 +257,12 @@ stmt *parse_stmt(allocator *up)
 		token_expect(')');
 		s->ifelse.s_then = parse_stmt(up);
 		s->ifelse.s_else = token_match_kw(tokens.kw_else)? parse_stmt(up): NULL;
+	} else if (token_match_kw(tokens.kw_while)) {
+		s->kind = STMT_WHILE;
+		token_expect('(');
+		s->ifelse.cond = parse_expr(up);
+		token_expect(')');
+		s->ifelse.s_then = parse_stmt(up);
 	} else if (token_is(TOKEN_NAME)) {
 		if (lookahead_is(':')) {
 			s->kind = STMT_DECL;

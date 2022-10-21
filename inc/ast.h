@@ -41,6 +41,7 @@ typedef enum stmt_kind {
 	STMT_ASSIGN,
 	STMT_DECL,
 	STMT_IFELSE,
+	STMT_WHILE,
 	STMT_BLOCK,
 	STMT_RETURN,
 

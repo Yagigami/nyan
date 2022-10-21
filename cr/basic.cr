@@ -131,6 +131,12 @@ multiply func(a: int32, b: int32): int32
 	return a + multiply(a, b - 1);
 }
 
+quotient func(dividend: int32, divisor: int32): int32
+{
+	if (dividend < divisor) return 0;
+	else return 1 + quotient(dividend - divisor, divisor);
+}
+
 entry func(): int32
 {
 	first :int32 = 3;
@@ -138,6 +144,8 @@ entry func(): int32
 	wow_this_name_is_extremely_long :int32 = first;
 	sum :int32 = (first) + second - 5;
 	zero: int32 = sum - cannot_alias_phi() - 2;
-	return zero + multiply(3+4, cap());
+	forty_two: int32 = zero + multiply(3+4, cap());
+	seven: int32 = quotient(forty_two, 6);
+	return seven - 7;
 }
 

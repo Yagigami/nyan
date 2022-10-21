@@ -3,6 +3,7 @@
 
 #include <assert.h>
 #include <stdint.h>
+#include <string.h>
 
 
 enum x86_64_reg
@@ -56,7 +57,7 @@ static byte opcode_anysize(byte opcode, int bytes)
 static byte *load(byte *p, enum x86_64_reg to, idx_t offset, int bytes)
 {
 	override_if16b(p, bytes);
-	if (bytes == 8 || to >= R8) *p++ = rex(bytes==8, to>>3, 0, 0);
+	if (bytes == 1 || bytes == 8 || to >= R8) *p++ = rex(bytes==8, to>>3, 0, 0);
 	*p++ = opcode_anysize(0x8b, bytes);
 	return emit_disp(p, to, RBP, offset);
 }
@@ -64,7 +65,8 @@ static byte *load(byte *p, enum x86_64_reg to, idx_t offset, int bytes)
 static byte *store(byte *p, enum x86_64_reg from, idx_t offset, int bytes)
 {
 	override_if16b(p, bytes);
-	if (bytes == 8 || from >= R8) *p++ = rex(bytes==8, from>>3, 0, 0);
+	// if bytes == 1, you only need a REX if you are accessing registers other than ACDB, technically
+	if (bytes == 1 || bytes == 8 || from >= R8) *p++ = rex(bytes==8, from>>3, 0, 0);
 	*p++ = opcode_anysize(0x89, bytes);
 	return emit_disp(p, from, RBP, offset);
 }
@@ -72,7 +74,7 @@ static byte *store(byte *p, enum x86_64_reg from, idx_t offset, int bytes)
 static byte *addsub(byte *p, enum x86_64_reg L, enum x86_64_reg R, enum ssa_opcode opc, int bytes)
 {
 	byte opcode = opc == SSA_ADD? 0x01: opc == SSA_SUB? 0x29: -1;
-	if (bytes == 8 || L >= R8 || R >= R8) *p++ = rex(bytes==8, R>>3, 0, L>>3);
+	if (bytes == 1 || bytes == 8 || L >= R8 || R >= R8) *p++ = rex(bytes==8, R>>3, 0, L>>3);
 	*p++ = opcode_anysize(opcode, bytes);
 	*p++ = modrm(3, L, R);
 	return p;
@@ -81,7 +83,7 @@ static byte *addsub(byte *p, enum x86_64_reg L, enum x86_64_reg R, enum ssa_opco
 static byte *addsubimm(byte *p, enum x86_64_reg r, idx_t imm, enum ssa_opcode opc, int bytes)
 {
 	byte opcode_ext = opc == SSA_ADD? 0: opc == SSA_SUB? 5: -1;
-	if (bytes == 8 || r >= R8) *p++ = rex(bytes==8, 0, 0, r>>3);
+	if (bytes == 1 || bytes == 8 || r >= R8) *p++ = rex(bytes==8, 0, 0, r>>3);
 	if (-0x80 <= imm && imm < 0x80) {
 		*p++ = opcode_anysize(0x83, bytes);
 		*p++ = modrm(3, r, opcode_ext);
@@ -110,7 +112,7 @@ static byte *pop64(byte *p, enum x86_64_reg r)
 static byte *mov(byte *p, enum x86_64_reg L, enum x86_64_reg R, int bytes)
 {
 	override_if16b(p, bytes);
-	if (bytes == 8 || L >= R8 || R >= R8) *p++ = rex(bytes==8, L>>3, 0, R>>3);
+	if (bytes == 1 || bytes == 8 || L >= R8 || R >= R8) *p++ = rex(bytes==8, L>>3, 0, R>>3);
 	*p++ = opcode_anysize(0x8b, bytes);
 	*p++ = modrm(3, R, L);
 	return p;
@@ -267,7 +269,7 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 				width = LINFO_GET_SIZE(linfo[i->R]);
 				p = load(p, RDX, locals[i->R], width);
 				p = test(p, RDX, RDX, width);
-				p = setcc_mem(p, locals[i->to], SSAB_NE);
+				p = setcc_mem(p, locals[i->to], SSAB_EQ); // test dl, dl gives ZF iff dl == 0
 				break;
 
 			case SSA_IMM:
@@ -336,7 +338,8 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 	byte *base = ins.buf.addr;
 	for (gen_reloc *reloc = label_relocs.buf.addr, *end = label_relocs.end;
 			reloc != end; reloc++) {
-		base[reloc->offset] = labels[reloc->symref] - reloc->offset - 4;
+		uint32_t rel = labels[reloc->symref] - reloc->offset - 4;
+		memcpy(base + reloc->offset, &rel, sizeof rel);
 	}
 	
 	dyn_arr_fini(&label_relocs, a);

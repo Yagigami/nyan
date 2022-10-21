@@ -17,31 +17,28 @@ sum func(n: int32): int32
 	}
 }
 
-add func(a: int32, b: int32): int32
+uses_for func(n: int32): int32
 {
-	return a + b;
+	sum: int32 = 0;
+	i: int32 = 1;
+	while (i <= n) {
+		sum = sum + i;
+		i = i + 1;
+	}
+	return sum;
 }
 
-other func() : int32
+foo func(x: bool): bool
 {
-	a :int32 = 8;
-	if (true)
-		if (true)
-			a = 0;
-		else
-			a = 4;
-	else
-		if (false)
-			a = 3;
-		else
-			a = 0;
-	return a;
+	return !x;
 }
 
 entry func() : int32
 {
 	a :int32 = 1;
 	b :int32 = 3;
-	return a + b - other();
+	if (foo(true))
+		return 1;
+	return uses_for(4);
 }
 

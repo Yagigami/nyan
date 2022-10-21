@@ -9,8 +9,8 @@ MAIN = $(addsuffix .c,$(addprefix src/,$(HASMAIN)))
 BIN = croute
 TEST = test
 
-CC = gcc
-LD = gcc
+CC = gcc-12.2.0
+LD = gcc-12.2.0
 AS = nasm
 
 INCPATH = inc

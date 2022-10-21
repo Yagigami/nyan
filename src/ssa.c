@@ -53,7 +53,18 @@ static ssa_ref new_local(dyn_arr *locals, local_info linfo, allocator *a)
 	return num;
 }
 
-static ssa_ref ir3_expr(ir3_func *f, expr *e, map *e2t, map_stack *stk, allocator *a)
+static ssa_ref ir3_expr(ir3_func *f, expr *e, map *e2t, map_stack *stk, allocator *a);
+
+static ssa_ref ir3_expr_unary(ir3_func *f, expr *e, map *e2t, map_stack *stk, allocator *a, local_info linfo)
+{
+	ssa_ref inner = ir3_expr(f, e->unary.operand, e2t, stk, a);
+	ssa_ref number = new_local(&f->locals, linfo, a);
+	token_kind op = e->unary.op;
+	dyn_arr_push(&f->ins, &(ssa_instr){ .kind = op == '!'? SSA_BOOL_NEG: -1, number, inner }, sizeof(ssa_instr), a);
+	return number;
+}
+
+ssa_ref ir3_expr(ir3_func *f, expr *e, map *e2t, map_stack *stk, allocator *a)
 {
 	map_entry *asso = map_find(e2t, (key_t) e, intern_hash((key_t) e), _string_cmp2); assert(asso);
 	type_t *type = (type_t*) asso->v;
@@ -159,6 +170,11 @@ case EXPR_CMP:
 	return number;
 	}
 
+case EXPR_UNARY:
+	{
+	return ir3_expr_unary(f, e, e2t, stk, a, linfo);
+	}
+
 default:
 	__builtin_unreachable();
 	}
@@ -247,6 +263,55 @@ case STMT_IFELSE:
 		br->R = label;
 	}
 	post_n[-1].end = post_n->begin = dyn_arr_size(&f->ins);
+	break;
+	}
+
+case STMT_WHILE:
+	{
+
+	/*
+	 * L0:
+	 * while (c)
+	 * 	s;
+	 * L3:
+	 *
+	 * becomes:
+	 * L0:
+	 * goto L2
+	 * L1:
+	 * 	s;
+	 * 	goto L2
+	 * L2:
+	 * 	if (c) goto L3
+	 * 	else goto L1
+	 * L3:
+	 */
+
+	ssa_instr *goto_cond = dyn_arr_push(&f->ins, NULL, sizeof *goto_cond, a);
+	idx_t cond_idx = (void*) goto_cond - f->ins.buf.addr;
+	goto_cond->kind = SSA_GOTO;
+
+	ssa_ref lbl_body = dyn_arr_size(&f->nodes) / sizeof(ir3_node);
+	ir3_node *body = dyn_arr_push(&f->nodes, NULL, sizeof *body, a);
+	body[-1].end = body->begin = dyn_arr_size(&f->ins);
+	ir3_stmt(f, s->ifelse.s_then, e2t, stk, blk, a);
+	ssa_ref lbl_cond = dyn_arr_size(&f->nodes) / sizeof(ir3_node);
+	goto_cond = f->ins.buf.addr + cond_idx;
+	goto_cond->to = lbl_cond;
+	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_GOTO, lbl_cond }, sizeof(ssa_instr), a);
+
+	ir3_node *cond_blk = dyn_arr_push(&f->nodes, NULL, sizeof *cond_blk, a);
+	cond_blk[-1].end = cond_blk->begin = dyn_arr_size(&f->ins);
+	ssa_ref cond = ir3_expr(f, s->ifelse.cond, e2t, stk, a);
+	ssa_ref check = new_local(&f->locals, linfo_tbl[TYPE_BOOL], a);
+	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_BOOL, check, 0 }, sizeof(ssa_instr), a);
+	ssa_ref lbl_post = dyn_arr_size(&f->nodes) / sizeof(ir3_node);
+	ir3_node *post = dyn_arr_push(&f->nodes, NULL, sizeof *post, a);
+	buf[0] = (ssa_instr){ .kind=SSA_BR, SSAB_EQ, cond, check };
+	buf[1] = (ssa_instr){ .L=lbl_post, .R=lbl_body };
+	dyn_arr_push(&f->ins, buf, 2*sizeof *buf, a);
+	post[-1].end = post->begin = dyn_arr_size(&f->ins);
+
 	break;
 	}
 
@@ -358,6 +423,7 @@ static void ir2_decl_func(ir3_func *dst, ir3_func *src, allocator *a)
 		case SSA_GLOBAL_REF:
 		case SSA_GOTO:
 		case SSA_ARG:
+		case SSA_BOOL_NEG:
 			dyn_arr_push(&dst->ins, instr, sizeof *instr, a);
 			break;
 		case SSA_ADD:
@@ -366,8 +432,9 @@ static void ir2_decl_func(ir3_func *dst, ir3_func *src, allocator *a)
 			dyn_arr_push(&dst->ins, &(ssa_instr){ .kind=instr->kind, instr->to, instr->to, instr->R }, sizeof *instr, a);
 			break;
 		case SSA_BR:
-			dyn_arr_push(&dst->ins, &(ssa_instr){ .kind=SSA_BR, invert_cc[instr->to], instr->L, instr->R }, sizeof *instr, a);
-			dyn_arr_push(&dst->ins, &(ssa_instr){ .L=instr[1].R }, sizeof *instr, a);
+			dyn_arr_push(&dst->ins, &(ssa_instr){ .kind=SSA_BR, instr->to, instr->L, instr->R }, sizeof *instr, a);
+			dyn_arr_push(&dst->ins, &(ssa_instr){ .L=instr[1].L }, sizeof *instr, a);
+			dyn_arr_push(&dst->ins, &(ssa_instr){ .kind=SSA_GOTO, instr[1].R }, sizeof(ssa_instr), a);
 			instr++;
 			break;
 		case SSA_CALL:
@@ -417,7 +484,7 @@ void test_3ac(void)
 	allocator *gpa = (allocator*)&malloc_allocator;
 	ast_init(gpa);
 	allocator_geom perma; allocator_geom_init(&perma, 16, 8, 0x100, gpa);
-	token_init("cr/basic.cr", ast.temps, &perma.base);
+	token_init("cr/simpler.cr", ast.temps, &perma.base);
 	allocator_geom just_ast; allocator_geom_init(&just_ast, 10, 8, 0x100, gpa);
 	module_t module = parse_module(&just_ast.base);
 	scope global;

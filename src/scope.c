@@ -105,6 +105,10 @@ void resolve_stmt(stmt *s, dyn_arr *add_subscopes, scope_stack_l *list, allocato
 		if (s->ifelse.s_else)
 			resolve_stmt(s->ifelse.s_else, add_subscopes, list, up, final);
 		break;
+	case STMT_WHILE:
+		resolve_expr(s->ifelse.cond, list, up, final);
+		resolve_stmt(s->ifelse.s_then, add_subscopes, list, up, final);
+		break;
 	case STMT_BLOCK:
 		resolve_stmt_block(s->blk, add_subscopes, list, up, final);
 		break;

@@ -33,9 +33,9 @@ static const enum {
 
 	['+'] = PREC_ADD, ['-'] = PREC_ADD,
 
-	[TOKEN_EQ] = TOKEN_EQ, [TOKEN_NEQ] = TOKEN_EQ,
-	['<']      = TOKEN_EQ, [TOKEN_LEQ] = TOKEN_EQ,
-	['>']      = TOKEN_EQ, [TOKEN_GEQ] = TOKEN_EQ,
+	[TOKEN_EQ] = PREC_CMP, [TOKEN_NEQ] = PREC_CMP,
+	['<']      = PREC_CMP, [TOKEN_LEQ] = PREC_CMP,
+	['>']      = PREC_CMP, [TOKEN_GEQ] = PREC_CMP,
 };
 
 static bool isident(char c) { return isdigit(c) || isalpha(c) || c == '_'; }
@@ -75,6 +75,7 @@ int token_init(const char *path, allocator *up, allocator *names)
 		KW(true);
 		KW(if);
 		KW(else);
+		KW(while);
 		KW(return);
 		#undef KW
 		#undef INSERT

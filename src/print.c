@@ -65,7 +65,7 @@ static int fprint_ir3_instr(FILE *to, const ssa_instr *i, int *extra_offset, con
 	switch (i->kind) {
 	case SSA_SET:
 		*extra_offset = sizeof *i;
-		return fprintf(to, "set(%s) %%%hhx:%s, %%%hhx, %%%hhx\n", opc2s[i[1].to-SSAB_EQ], i->to, T, i->L, i->R);
+		return fprintf(to, "%%%hhx:%s = set(%s), %%%hhx, %%%hhx\n", i->to, T, opc2s[i[1].to-SSAB_EQ], i->L, i->R);
 	case SSA_IMM:
 		*extra_offset = sizeof *i;
 		return fprintf(to, "%%%hhx:%s = #%x\n", i->to, T, i[1].v);
@@ -94,6 +94,7 @@ static int fprint_ir3_instr(FILE *to, const ssa_instr *i, int *extra_offset, con
 	case SSA_BOOL: return fprintf(to, "%%%hhx:%s = %db\n", i->to, T, i->L);
 	case SSA_ARG: return fprintf(to, "%%%hhx:%s = args.%hhx\n", i->to, T, i->L);
 	case SSA_GLOBAL_REF: return fprintf(to, "%%%hhx:%s = global.%x\n", i->to, T, i->L);
+	case SSA_BOOL_NEG: return fprintf(to, "%%%hhx:%s = bool neg %%%hhx\n", i->to, T, i->L);
 	case SSA_ADD: return fprintf(to, "%%%hhx:%s = add %%%hhx, %%%hhx\n", i->to, T, i->L, i->R);
 	case SSA_SUB: return fprintf(to, "%%%hhx:%s = sub %%%hhx, %%%hhx\n", i->to, T, i->L, i->R);
 	default:
