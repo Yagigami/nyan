@@ -40,7 +40,7 @@ static bool same_type(const type_t *L, const type_t *R)
 static const size_t limits[TYPE_INT64-TYPE_INT8+1] = {
 	[TYPE_INT8 -TYPE_INT8] = (1UL<<8)-1,
 	[TYPE_INT32-TYPE_INT8] = (1UL<<32)-1,
-	[TYPE_INT64-TYPE_INT8] = (1UL<<64)-1,
+	[TYPE_INT64-TYPE_INT8] = -1,
 };
 static bool compatible_type(const type_t *test, const type_t *ref, const expr *extra)
 {
@@ -266,6 +266,7 @@ static void complete_type(type_t *t, scope_stack_l *stk, map *e2t, allocator *up
 	case TYPE_ARRAY:
 		type_check_expr(t->array_t.unchecked_count, stk, &type_int64, RVALUE, e2t, up, true);
 		t->array_t.checked_count = t->array_t.unchecked_count->value;
+		complete_type(t->array_t.base, stk, e2t, up);
 		break;
 	default:
 		// nop

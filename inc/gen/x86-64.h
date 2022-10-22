@@ -19,6 +19,7 @@ typedef struct gen_sym {
 
 typedef struct gen_module {
 	scratch_arr syms;
+	scratch_arr rodata;
 	idx_t code_size;
 	idx_t num_refs;
 } gen_module;

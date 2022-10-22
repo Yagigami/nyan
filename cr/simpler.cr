@@ -1,3 +1,9 @@
+ndarr func(): int32
+{
+	a: int32[3][2] = { { 2, 4, 6 }, { 1, 3, 5 } };
+	return a[0][2] + a[1][1];
+}
+
 uses_arr func(base: int32): int32
 {
 	arr: int32[4] = { 1, 2, 3, 4 };

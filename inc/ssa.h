@@ -81,7 +81,10 @@ typedef struct ir3_func {
 } ir3_func;
 
 typedef struct ir3_sym {
-	union { ir3_func f; allocation m; };
+	union {
+		ir3_func f;
+		struct { allocation m; size_t align; };
+	};
 	enum { IR3_FUNC, IR3_BLOB } kind;
 } ir3_sym;
 

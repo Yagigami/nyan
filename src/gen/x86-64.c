@@ -80,6 +80,14 @@ static byte *addsub(byte *p, enum x86_64_reg L, enum x86_64_reg R, enum ssa_opco
 	return p;
 }
 
+static byte *umul(byte *p, enum x86_64_reg fac, int bytes)
+{
+	if (bytes == 1 || bytes == 8 || fac >= R8) *p++ = rex(bytes==8, 0, 0, fac>>3);
+	*p++ = opcode_anysize(0xf7, bytes);
+	*p++ = modrm(3, fac, 4); // for 1-address imul, opcode extension is 5
+	return p;
+}
+
 static byte *addsubimm(byte *p, enum x86_64_reg r, idx_t imm, enum ssa_opcode opc, int bytes)
 {
 	byte opcode_ext = opc == SSA_ADD? 0: opc == SSA_SUB? 5: -1;
@@ -194,6 +202,26 @@ static byte *test(byte *p, enum x86_64_reg L, enum x86_64_reg R, int bytes)
 	return p;
 }
 
+static byte *lea(byte *p, enum x86_64_reg res, enum x86_64_reg base, idx_t disp32, int bytes)
+{
+	assert(bytes == 2 || bytes == 4 || bytes == 8);
+	p = override_if16b(p, bytes);
+	if (bytes == 8 || res >= R8 || base >= R8) *p++ = rex(bytes==8, res>>3, 0, base>>3);
+	*p++ = 0x8d;
+	return emit_disp(p, res, base, disp32);
+}
+
+static byte *lea_rip(byte *p, enum x86_64_reg res, idx_t disp32, int bytes)
+{
+	assert(bytes == 2 || bytes == 4 || bytes == 8);
+	p = override_if16b(p, bytes);
+	if (bytes == 8 || res >= R8) *p++ = rex(bytes==8, res>>3, 0, 0);
+	*p++ = 0x8d;
+	*p++ = modrm(0, RBP, res);
+	*p++ = sib(0, 0, 0);
+	return imm32(p, disp32);
+}
+
 // FIXME: handle more than 6 args
 static const enum x86_64_reg sysv_arg[6] = { RDI, RSI, RDX, RCX, R8, R9 };
 
@@ -245,7 +273,7 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 				*p++ = 0x80 | bc2cc[i->to];
 				{
 				idx_t offset = dyn_arr_size(&ins) + p - buf;
-				dyn_arr_push(&label_relocs, &(gen_reloc){ .offset=offset, .symref=i[1].L }, sizeof(gen_reloc), a);
+				dyn_arr_push(&label_relocs, &(gen_reloc){ offset, i[1].L }, sizeof(gen_reloc), a);
 				}
 				p = imm32(p, 0);
 				i++;
@@ -287,6 +315,42 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 				p = store(p, RAX, locals[i->to], width);
 				break;
 
+			case SSA_MUL:
+				width = LINFO_GET_SIZE(linfo[i->to]);
+				p = load(p, RAX, locals[i->to], width);
+				p = load(p, RCX, locals[i->R ], width);
+				p = umul(p, RCX, width);
+				p = store(p, RAX, locals[i->to], width);
+				break;
+
+			case SSA_MEMCOPY:
+				width = LINFO_GET_SIZE(linfo[i->to]);
+				// slow and dirty repne movsb
+				p = load(p, RDI, locals[i->to], 8); // assuming pointers are 8-bytes
+				p = load(p, RSI, locals[i->L ], 8);
+				p = mov_imm32(p, RCX, width);
+				*p++ = 0xf2;
+				*p++ = 0xa4;
+				break;
+
+			case SSA_ADDRESS:
+				width = LINFO_GET_SIZE(linfo[i->to]);
+				p = lea(p, RAX, RBP, locals[i->L], width);
+				p = store(p, RAX, locals[i->to], width);
+				break;
+
+			case SSA_LOAD:
+				width = LINFO_GET_SIZE(linfo[i->to]);
+				p = load(p, RAX, locals[i->L], width);
+				p = store(p, RAX, locals[i->to], width);
+				break;
+
+			case SSA_STORE: // .to -> .L
+				width = LINFO_GET_SIZE(linfo[i->to]);
+				p = load(p, RAX, locals[i->to], width);
+				p = store(p, RAX, locals[i->L], width);
+				break;
+
 			case SSA_CALL:
 				{
 				assert(i->R < 6);
@@ -301,7 +365,7 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 				}
 				*p++ = 0xe8;
 				idx_t offset = dyn_arr_size(&ins) + p - buf;
-				gen_reloc r = { .offset=offset, .symref=locals[i->L] };
+				gen_reloc r = { offset, locals[i->L] };
 				dyn_arr_push(&refs, &r, sizeof r, a);
 				p = imm32(p, 0);
 				p = store(p, RAX, locals[i->to], LINFO_GET_SIZE(linfo[i->to]));
@@ -310,7 +374,17 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 				break;
 
 			case SSA_GLOBAL_REF:
+				width = LINFO_GET_SIZE(linfo[i->to]);
 				locals[i->to] = i->L;
+				if (width) {
+					assert(width == 8);
+					p = lea_rip(p, RAX, 0, width);
+					// reloc is at the last 4 bytes
+					idx_t offset = dyn_arr_size(&ins) + p - buf - 4;
+					gen_reloc r = { offset, i->L }; // rip relative addressing is like direct call for the addend
+					dyn_arr_push(&refs, &r, sizeof r, a);
+					p = store(p, RAX, locals[i->to], width);
+				}
 				break;
 
 			case SSA_RET:
@@ -355,16 +429,26 @@ gen_module gen_x86_64(ir3_module m2ac, allocator *a)
 	gen_module out;
 	out.code_size = 0;
 	out.num_refs = 0;
-	dyn_arr dest, refs;
+	dyn_arr dest, refs, rodata;
 	dyn_arr_init(&dest, 0*sizeof(gen_sym), a);
 	dyn_arr_init(&refs, 0*sizeof(gen_reloc), a);
-	for (ir3_func *prev = scratch_start(m2ac), *end = scratch_end(m2ac);
+	dyn_arr_init(&rodata, 0*sizeof(gen_reloc), a);
+	for (ir3_sym *prev = scratch_start(m2ac), *end = scratch_end(m2ac);
 			prev != end; prev++) {
-		gen_sym *new = dyn_arr_push(&dest, NULL, sizeof *new, a);
-		out.code_size += gen_symbol(new, prev, a);
-		out.num_refs  += scratch_len(new->refs) / sizeof(gen_reloc);
+		if (prev->kind == IR3_BLOB) {
+			idx_t at = dyn_arr_size(&rodata);
+			idx_t aligned = (at + prev->align - 1) / prev->align * prev->align;
+			byte *pad = dyn_arr_push(&rodata, NULL, aligned - at, a);
+			if (aligned - at) memset(pad, 0, aligned - at);
+			dyn_arr_push(&rodata, prev->m.addr, prev->m.size, a);
+		} else {
+			gen_sym *new = dyn_arr_push(&dest, NULL, sizeof *new, a);
+			out.code_size += gen_symbol(new, &prev->f, a);
+			out.num_refs  += scratch_len(new->refs) / sizeof(gen_reloc);
+		}
 	}
 	out.syms = scratch_from(&dest, a, a);
+	out.rodata = scratch_from(&rodata, a, a);
 	return out;
 }
 

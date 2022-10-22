@@ -185,6 +185,7 @@ expr *parse_expr(allocator *up)
 	if (token_match('{')) {
 		expr *init = ALLOC(up, sizeof *init, alignof *init).addr;
 		init->kind = EXPR_NONE;
+		init->pos = token_pos();
 		dyn_arr init_list; dyn_arr_init(&init_list, 0, ast.temps);
 		do {
 			expr *field = parse_expr(up);

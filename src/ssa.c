@@ -64,9 +64,9 @@ static local_info type2linfo(type_t *type)
 	case TYPE_ARRAY:
 		base = type2linfo(type->array_t.base);
 		size = type->array_t.checked_count * LINFO_GET_SIZE(base);
-		align = LINFO_GET_ALIGN(base) > 4? LINFO_GET_ALIGN(base): 4;
+		align = LINFO_GET_ALIGN(base);
 		surface = SSAT_ARRAY;
-		return LINFO(size, align, surface);
+		return ssa_linfo(size, align, surface);
 	default:
 		return linfo_tbl[type->kind];
 	}
@@ -101,22 +101,18 @@ static void serialize_initlist(byte *blob, expr *e, type_t *t, map *e2t, map_sta
 	switch (e->kind) {
 case EXPR_INITLIST:
 	assert(t->kind == TYPE_ARRAY);
+	local_info linfo = type2linfo(t->array_t.base);
 	for (expr **part = scratch_start(e->call.args); part != scratch_end(e->call.args); part++) {
-		intptr_t i = (intptr_t) blob;
-		local_info linfo = type2linfo(t->array_t.base);
-		// align
-		i = (i + LINFO_GET_ALIGN(linfo) - 1) / LINFO_GET_ALIGN(linfo) * LINFO_GET_ALIGN(linfo);
-		blob = (byte*) i;
 		serialize_initlist(blob, *part, t->array_t.base, e2t, stk);
 		blob += LINFO_GET_SIZE(linfo); // TODO: basically query the `next` insert pos from a layout structure
 	}
 	break;
 case EXPR_INT:
 	// little endian things
-	memcpy(blob, &e[0].value, LINFO_GET_SIZE(type2linfo(t)));
+	memcpy(blob, &e->value, LINFO_GET_SIZE(type2linfo(t)));
 	break;
 case EXPR_BOOL:
-	memcpy(blob, &e[0].value, 1);
+	memcpy(blob, &e->value, 1);
 	break;
 default:
 	__builtin_unreachable();
@@ -281,7 +277,7 @@ case EXPR_INDEX:
 
 case EXPR_INITLIST:
 	{
-	ir3_sym sym = { .m=ALLOC(a, LINFO_GET_SIZE(linfo), 8), .kind=IR3_BLOB };
+	ir3_sym sym = { .m=ALLOC(a, LINFO_GET_SIZE(linfo), 8), .align=LINFO_GET_ALIGN(linfo), .kind=IR3_BLOB };
 	byte *blob = sym.m.addr;
 	idx_t ref = dyn_arr_size(&bytecode.blob) / sizeof sym;
 	dyn_arr_push(&bytecode.blob, &sym, sizeof sym, bytecode.temps);
@@ -538,10 +534,13 @@ static void ir2_decl_func(ir3_func *dst, ir3_func *src, allocator *a)
 		case SSA_GOTO:
 		case SSA_ARG:
 		case SSA_BOOL_NEG:
+		case SSA_LOAD: case SSA_STORE: case SSA_ADDRESS:
+		case SSA_MEMCOPY:
 			dyn_arr_push(&dst->ins, instr, sizeof *instr, a);
 			break;
 		case SSA_ADD:
 		case SSA_SUB:
+		case SSA_MUL: // x86 mul/imul are a reminder that RAX was the accumulator // basically they are 1-address (can be 2/3 for imul)
 			dyn_arr_push(&dst->ins, &(ssa_instr){ .kind=SSA_COPY, instr->to, instr->L }, sizeof *instr, a);
 			dyn_arr_push(&dst->ins, &(ssa_instr){ .kind=instr->kind, instr->to, instr->to, instr->R }, sizeof *instr, a);
 			break;
@@ -572,9 +571,15 @@ static void ir2_decl_func(ir3_func *dst, ir3_func *src, allocator *a)
 ir3_module convert_to_2ac(ir3_module m3ac, allocator *a)
 {
 	dyn_arr m2ac; dyn_arr_init(&m2ac, 0, a);
-	for (ir3_func *src = scratch_start(m3ac); src != scratch_end(m3ac); src++) {
-		ir3_func *dst = dyn_arr_push(&m2ac, NULL, sizeof *dst, a);
-		ir2_decl_func(dst, src, a);
+	for (ir3_sym *src = scratch_start(m3ac); src != scratch_end(m3ac); src++) {
+		if (src->kind == IR3_BLOB) {
+			// TODO: move the aggregation of all data from gen to here
+			dyn_arr_push(&m2ac, src, sizeof *src, a);
+		} else {
+			ir3_sym *dst = dyn_arr_push(&m2ac, NULL, sizeof *dst, a);
+			dst->kind = IR3_FUNC;
+			ir2_decl_func(&dst->f, &src->f, a);
+		}
 	}
 	scratch_fini(m3ac, a);
 	return scratch_from(&m2ac, a, a);
@@ -620,17 +625,17 @@ void test_3ac(void)
 
 		print(stdout, "3-address code:\n");
 		dump_3ac(m3ac, bytecode.names.buf.addr);
-		// ir3_module m2ac = convert_to_2ac(m3ac, gpa);
-		// print(stdout, "2-address code:\n");
-		// dump_3ac(m2ac, names.buf.addr);
+		ir3_module m2ac = convert_to_2ac(m3ac, gpa);
+		print(stdout, "2-address code:\n");
+		dump_3ac(m2ac, bytecode.names.buf.addr);
 
-		// gen_module gen = gen_x86_64(m2ac, gpa);
-		// int e = elf_object_from(&gen, "simpler.o", &names, gpa);
-		// if (e < 0) perror("objfile not generated");
+		gen_module gen = gen_x86_64(m2ac, gpa);
+		int e = elf_object_from(&gen, "simpler.o", &bytecode.names, gpa);
+		if (e < 0) perror("objfile not generated");
 
-		// gen_fini(&gen, gpa);
-		// ir3_fini(m2ac, gpa);
-		ir3_fini(m3ac, gpa);
+		gen_fini(&gen, gpa);
+		ir3_fini(m2ac, gpa);
+		// ir3_fini(m3ac, gpa);
 		for (map_entry *s = bytecode.names.buf.addr; s != bytecode.names.end; s++) {
 			allocation m = { (void*)s->k, s->v };
 			DEALLOC(gpa, m);
