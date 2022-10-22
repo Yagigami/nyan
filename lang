@@ -32,6 +32,10 @@ OPS:
 	// f name
 	// T type
 
+EXPR:	'(' expr ')'
+	initializer-list -> '{' expr, ... expr '}'
+	case-expr
+
 	assign		-> = *= /= %= >>= <<= &= |= ^= += -= +%= -%= *%=
 
 DECLS:	var-decl  : 'decl' name non-function-type '=' value ';'

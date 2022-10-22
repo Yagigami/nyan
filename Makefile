@@ -18,7 +18,7 @@ INCPATH = inc
 STDC = c11
 CFLAGS = -I $(INCPATH) -Wall -Wextra -Wno-switch -std=$(STDC) -fPIC
 ifeq ($(DEBUG),1)
-	CFLAGS += -g -O0 -fsanitize=undefined,address
+	CFLAGS += -ggdb3 -O0 -fsanitize=undefined,address
 	LDFLAGS += -fsanitize=undefined,address
 else
 	CFLAGS += -O3 -flto -DNDEBUG
@@ -34,12 +34,12 @@ all: $(OUT)/$(TEST) $(OUT)/$(BIN) dump
 test: $(OUT)/$(TEST)
 	$<
 
-GEN = basic.o
+GEN = simpler.o
 dump: $(OUT)/$(TEST)
 	$<
-	objdump -Dwr -Mintel --insn-width=6 $(GEN)
-	ld rt.o $(GEN)
-	./a.out
+	# objdump -Dwr -Mintel --insn-width=6 $(GEN)
+	# ld rt.o $(GEN)
+	# ./a.out
 
 $(OUT)/$(TEST): $(OUT)/$(TEST).o $(OBJ)
 	@echo LD $<

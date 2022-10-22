@@ -22,19 +22,24 @@ enum ssa_opcode
 	SSA_IMM, // 1 extension // little endian
 	SSA_ADD, SSA_SUB,
 	SSA_CALL, // to = call L (R args, ...) // 1 extension / 4 args
-	SSA_GLOBAL_REF,
+	SSA_GLOBAL_REF, // TODO: go back to `ins.to = ref(ext.v)`
 	SSA_COPY,
 	SSA_RET,
 	SSA_BOOL, // the value is embedded in the L field
 	SSA_LABEL,
+	// TODO: make BRcc/SETcc separate instructions for each cc
 	SSA_SET, // set(cc) dst, lhs, rhs // 1 ext (.to = cc)
 	SSA_BOOL_NEG,
-	// SSA_PHI, // to = phi L R
+	// SSA_PHI, // to = phi [L:ext.L] [R:ext.R]
 	// if ever arises the need to traverse the cfg,
 	// change the goto/br format slightly to make that possible
 	SSA_GOTO,
 	SSA_BR, // br(cc) lhs, rhs, then, else // 1 extension (.L=then, .R=else)
 	SSA_ARG,
+	SSA_ADDRESS,
+	SSA_STORE, SSA_LOAD,
+	SSA_MUL,
+	SSA_MEMCOPY, // dst = memcpy(src)
 
 	SSA_NUM
 };
@@ -47,7 +52,11 @@ enum ssa_branch_cc {
 enum ssa_type
 {
 	SSAT_NONE = 0,
+	SSAT_INT8,
 	SSAT_INT32,
+	SSAT_INT64,
+	SSAT_ARRAY,
+	SSAT_ANYPTR,
 	SSAT_BOOL,
 
 	SSAT_NUM
@@ -71,9 +80,17 @@ typedef struct ir3_func {
 	ssa_ref num_labels; // TODO: make a separate `ir2_func` type
 } ir3_func;
 
+typedef struct ir3_sym {
+	union { ir3_func f; allocation m; };
+	enum { IR3_FUNC, IR3_BLOB } kind;
+} ir3_sym;
+
 typedef scratch_arr ir3_module;
 ir3_module convert_to_3ac(module_t ast, scope *enclosing, map *e2t, dyn_arr *globals, allocator *a);
 ir3_module convert_to_2ac(ir3_module m3ac, allocator *a);
+
+void bytecode_init(allocator *temps);
+void bytecode_fini(void);
 
 int dump_3ac(ir3_module m, map_entry *globals);
 

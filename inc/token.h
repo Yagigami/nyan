@@ -59,7 +59,9 @@ extern struct global_token_state {
 	allocator *names;
 	dyn_arr line_marks; // array of source_idx
 	ident_t kw_func,
+		kw_int8,
 	        kw_int32,
+		kw_int64,
 		kw_bool,
 		kw_false,
 		kw_true,

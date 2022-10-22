@@ -1,20 +1,14 @@
-mut func(): int32
+uses_arr func(base: int32): int32
 {
-	mut :int32 = 1;
-	mut = 2;
-	mut = 3;
-	return mut + 1;
-}
-
-sum func(n: int32): int32
-{
-	if (n == 0)
-		return 0;
-	else {
-		s: int32 = n-1;
-		r: int32 = n + sum(s);
-		return     n + sum(s);
+	arr: int32[4] = { 1, 2, 3, 4 };
+	i: int32 = base;
+	ins: int32 = 0;
+	while (i < 4) {
+		arr[ins] = i;
+		i = i+1;
+		ins = ins+1;
 	}
+	return arr[3];
 }
 
 uses_for func(n: int32): int32

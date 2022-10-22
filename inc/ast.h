@@ -15,14 +15,19 @@ typedef idx_t decl_idx;
 
 typedef enum type_kind {
 	TYPE_NONE,
+	TYPE_ANY,
 
+	TYPE_INT8,
+	TYPE_PRIMITIVE_BEGIN = TYPE_INT8,
 	TYPE_INT32,
-	TYPE_PRIMITIVE_BEGIN = TYPE_INT32,
+	TYPE_INT64,
 	TYPE_BOOL,
 	TYPE_PRIMITIVE_END = TYPE_BOOL,
 
 	TYPE_FUNC,
 	TYPE_CHAINED = TYPE_FUNC,
+	TYPE_PTR,
+	TYPE_ARRAY,
 	
 	TYPE_NUM
 } type_kind;
@@ -57,6 +62,9 @@ typedef enum expr_kind {
 	EXPR_ADD,
 	EXPR_CMP,
 	EXPR_UNARY,
+	EXPR_INITLIST,
+	EXPR_ADDRESS,
+	EXPR_INDEX,
 } expr_kind;
 
 struct expr;
@@ -71,6 +79,10 @@ typedef struct type_t {
 			scratch_arr params;
 			struct type_t *ret_t;
 		} func_t;
+		struct {
+			union { size_t checked_count; struct expr *unchecked_count; };
+			struct type_t *base;
+		} array_t;
 	};
 	type_kind kind;
 } type_t;

@@ -59,7 +59,13 @@ static int fprint_source_line(FILE *to, source_idx offset)
 static int fprint_ir3_instr(FILE *to, const ssa_instr *i, int *extra_offset, const dyn_arr *locals)
 {
 	local_info *linfo = locals->buf.addr + i->to * sizeof *linfo;
-	static const char *type2s[SSAT_NUM] = { "<none>", "int32", "bool" };
+	static const char *type2s[SSAT_NUM] = {
+		[SSAT_NONE] = "<none>",
+		[SSAT_INT8] = "int8", [SSAT_INT32] = "int32", [SSAT_INT64] = "int64",
+		[SSAT_ARRAY] = "array",
+		[SSAT_ANYPTR] = "ptr",
+		[SSAT_BOOL] = "bool",
+	};
 #define T type2s[LINFO_GET_TYPE(*linfo)]
 	static const char *opc2s[SSAB_GE-SSAB_EQ+1] = { "eq", "ne", "lt", "le", "gt", "ge" };
 	switch (i->kind) {
@@ -93,10 +99,15 @@ static int fprint_ir3_instr(FILE *to, const ssa_instr *i, int *extra_offset, con
 	case SSA_COPY: return fprintf(to, "%%%hhx = %%%hhx\n", i->to, i->L);
 	case SSA_BOOL: return fprintf(to, "%%%hhx:%s = %db\n", i->to, T, i->L);
 	case SSA_ARG: return fprintf(to, "%%%hhx:%s = args.%hhx\n", i->to, T, i->L);
+	case SSA_LOAD: return fprintf(to, "%%%hhx:%s = load %%%hhx\n", i->to, T, i->L);
+	case SSA_STORE: return fprintf(to, "%%%hhx:%s = store %%%hhx\n", i->to, T, i->L);
 	case SSA_GLOBAL_REF: return fprintf(to, "%%%hhx:%s = global.%x\n", i->to, T, i->L);
+	case SSA_MEMCOPY: return fprintf(to, "%%%hhx:%s = memcopy(%%%hhx)\n", i->to, T, i->L);
 	case SSA_BOOL_NEG: return fprintf(to, "%%%hhx:%s = bool neg %%%hhx\n", i->to, T, i->L);
+	case SSA_ADDRESS: return fprintf(to, "%%%hhx:%s = addressof %%%hhx\n", i->to, T, i->L);
 	case SSA_ADD: return fprintf(to, "%%%hhx:%s = add %%%hhx, %%%hhx\n", i->to, T, i->L, i->R);
 	case SSA_SUB: return fprintf(to, "%%%hhx:%s = sub %%%hhx, %%%hhx\n", i->to, T, i->L, i->R);
+	case SSA_MUL: return fprintf(to, "%%%hhx:%s = mul %%%hhx, %%%hhx\n", i->to, T, i->L, i->R);
 	default:
 		return fprintf(to, "unknown<%hhx %hhx %hhx %hhx>\n", i->kind, i->to, i->L, i->R);
 	}

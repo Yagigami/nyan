@@ -4,10 +4,21 @@
 #include <stdbool.h>
 
 
+static int _string_cmp2(ident_t L, ident_t R) { return L - R; }
+
+// TODO: temporary
+static type_t type_int8  = { .kind=TYPE_INT8 };
+static type_t type_int32 = { .kind=TYPE_INT32 };
+static type_t type_int64 = { .kind=TYPE_INT64 };
+static type_t type_bool = { .kind=TYPE_BOOL };
+static type_t type_missing = { .kind=TYPE_NONE };
+static type_t type_any = { .kind=TYPE_ANY };
+
 // TODO: use an intern map
-static bool same_type(type_t *L, type_t *R)
+static bool same_type(const type_t *L, const type_t *R)
 {
 	if (L->kind == TYPE_NONE || R->kind == TYPE_NONE) return true; // already got an error earlier, dont need more
+	if (L->kind == TYPE_ANY || R->kind == TYPE_ANY) return true;
 	if (L->kind != R->kind) return false;
 	switch (L->kind) {
 	case TYPE_INT32:
@@ -18,91 +29,178 @@ static bool same_type(type_t *L, type_t *R)
 		{
 			assert(0 && "not implemented");
 		}
+	case TYPE_ARRAY:
+		return same_type(L->array_t.base, R->array_t.base) && L->array_t.checked_count == R->array_t.checked_count;
 	default:
 		return false;
 	}
 	__builtin_unreachable();
 }
 
-static int _string_cmp2(ident_t L, ident_t R) { return L - R; }
+static const size_t limits[TYPE_INT64-TYPE_INT8+1] = {
+	[TYPE_INT8 -TYPE_INT8] = (1UL<<8)-1,
+	[TYPE_INT32-TYPE_INT8] = (1UL<<32)-1,
+	[TYPE_INT64-TYPE_INT8] = (1UL<<64)-1,
+};
+static bool compatible_type(const type_t *test, const type_t *ref, const expr *extra)
+{
+	if (test->kind <= TYPE_ANY || ref->kind <= TYPE_ANY) return true;
+	if (TYPE_INT8 <= ref->kind && ref->kind <= TYPE_INT64)
+		return TYPE_INT8 <= test->kind && test->kind <= TYPE_INT64
+			&& (extra->kind != EXPR_INT || extra->value <= limits[ref->kind-TYPE_INT8]);
+	return same_type(test, ref);
+}
 
-// TODO: temporary
-static type_t type_int32 = { .kind=TYPE_INT32 };
-static type_t type_bool = { .kind=TYPE_BOOL };
-static type_t type_missing = { .kind=TYPE_NONE };
+static expr *decay_expr(type_t *t, expr *e, type_t **new, map *e2t, allocator *up)
+{
+	if (t->kind == TYPE_ARRAY) {
+		expr *addr = ALLOC(up, sizeof *addr, alignof *addr).addr;
+		addr->kind = EXPR_ADDRESS;
+		#ifndef NDEBUG
+		addr->pos = e->pos;
+		#endif
+		addr->unary.operand = e;
+		e = addr;
+		type_t *d = ALLOC(up, sizeof *d, alignof *d).addr;
+		d->kind = TYPE_PTR;
+		d->array_t.base = t->array_t.base;
+		*new = d;
+		map_entry *asso = map_add(e2t, (key_t) e, intern_hash, up);
+		asso->k = (key_t) e;
+		asso->v = (val_t) d;
+	}
+	return e;
+}
 
-static type_t *type_check_expr(expr *e, scope_stack_l *stk, value_category c, map *e2t, allocator *up)
+static type_t *type_check_expr(expr *e, scope_stack_l *stk, type_t *expecting, value_category c, map *e2t, allocator *up, bool eval)
 {
 	type_t *type = &type_missing;
 	switch (e->kind) {
-	case EXPR_INT:
-		if (!expect_or(c == RVALUE,
-				e->pos, "cannot assign to an integer.\n")) break;
-		type = &type_int32;
-		break;
-	case EXPR_BOOL:
-		if (!expect_or(c == RVALUE,
-				e->pos, "cannot assign to a boolean.\n")) break;
-		type = &type_bool;
-		break;
-	case EXPR_NAME:
-		{
-		map_entry *entry = map_find(&stk->scope->refs, e->name, intern_hash(e->name), _string_cmp2);
-		while (!entry && stk->next) {
-			stk = stk->next;
-			entry = map_find(&stk->scope->refs, e->name, intern_hash(e->name), _string_cmp2);
-		}
-		if (entry) type = (type_t*) entry->v;
-		break;
-		}
-	case EXPR_ADD:
-	case EXPR_CMP:
-		{
-		if (!expect_or(c == RVALUE,
-				e->pos, "cannot assign to the result of binary expression.\n")) break;
-		// TODO: change interface to tc_expr_expecting(L, type)
-		type_t *L = type_check_expr(e->binary.L, stk, RVALUE, e2t, up);
-		type_t *R = type_check_expr(e->binary.R, stk, RVALUE, e2t, up);
-		if (!expect_or(same_type(L, R) && same_type(L, &type_int32),
-				e->pos, "operands incompatible with this operation.\n")) break;
-		type = e->kind == EXPR_ADD? L: &type_bool;
-		break;
-		}
-	case EXPR_UNARY:
-		{
-		type_t *t = type_check_expr(e->unary.operand, stk, RVALUE, e2t, up);
-		if (!expect_or(same_type(t, &type_bool),
-				e->pos, "cannot find the boolean complement of non-boolean.\n")) break;
-		type = t;
-		break;
-		}
-	case EXPR_CALL:
-		{
-		if (!expect_or(c == RVALUE,
-				e->pos, "cannot assign to result of a function call.\n")) break;
-		type_t *operand = type_check_expr(e->call.operand, stk, RVALUE, e2t, up);
-		if (!expect_or(operand->kind == TYPE_FUNC,
-				e->pos, "attempt to call a non-callable:\n")) break;
-		scratch_arr params = operand->func_t.params;
-		expr **arg = scratch_start(e->call.args);
-		if (!expect_or(scratch_len(e->call.args) / sizeof(expr*) == scratch_len(params) / sizeof(func_arg),
-				e->pos, "function call with the wrong number of arguments provided.\n"))
-			break;
-		for (func_arg *param = scratch_start(params); param != scratch_end(params); param++, arg++) {
-			type_t *arg_type = type_check_expr(*arg, stk, RVALUE, e2t, up);
-			if (!expect_or(same_type(param->type, arg_type),
-					arg[0]->pos, "type of this argument mismatches the parameter type.\n"))
-				goto err; // nested break;
-		}
-		type = operand->func_t.ret_t;
-		break;
-		}
-	case EXPR_NONE:
-		break;
-	default:
-		assert(0);
+case EXPR_INT:
+	if (!expect_or(c == RVALUE,
+			e->pos, "cannot assign to an integer.\n")) break;
+	type = e->value <= limits[TYPE_INT32-TYPE_INT8]? &type_int32: &type_int64;
+	break;
+
+case EXPR_BOOL:
+	if (!expect_or(c == RVALUE,
+			e->pos, "cannot assign to a boolean.\n")) break;
+	type = &type_bool;
+	break;
+
+case EXPR_NAME:
+	{
+	// LVALUE is ok
+	if (!expect_or(!eval, e->pos, "cannot evaluate a variable in a compilation context.\n")) break;
+	map_entry *entry = map_find(&stk->scope->refs, e->name, intern_hash(e->name), _string_cmp2);
+	while (!entry && stk->next) {
+		stk = stk->next;
+		entry = map_find(&stk->scope->refs, e->name, intern_hash(e->name), _string_cmp2);
 	}
-err:;
+	if (entry) type = (type_t*) entry->v;
+	break;
+	}
+
+case EXPR_ADD:
+case EXPR_CMP:
+	{
+	if (!expect_or(c == RVALUE,
+			e->pos, "cannot assign to the result of binary expression.\n")) break;
+	expr *Lv = e->binary.L, *Rv = e->binary.R;
+	type_t *L = type_check_expr(Lv, stk, &type_int64, RVALUE, e2t, up, eval);
+	type_check_expr(Rv, stk, L, RVALUE, e2t, up, eval);
+	type = 	e->kind == EXPR_ADD? L:
+		e->kind == EXPR_CMP? &type_bool: &type_missing;
+	if (!eval) break;
+	token_kind op = e->binary.op;
+	if (e->kind == EXPR_ADD) {
+		e->kind = EXPR_INT;
+		if (op == '+') 		e->value = Lv->value + Rv->value;
+		else if (op == '-')	e->value = Lv->value - Rv->value;
+		else __builtin_unreachable();
+	} else if (e->kind == EXPR_CMP) {
+		e->kind = EXPR_INT;
+		if (op == TOKEN_EQ)		e->value = Lv->value == Rv->value;
+		else if (op == TOKEN_NEQ)	e->value = Lv->value != Rv->value;
+		else if (op == '<')		e->value = Lv->value <  Rv->value;
+		else if (op == TOKEN_LEQ)	e->value = Lv->value <= Rv->value;
+		else if (op == '>')		e->value = Lv->value >  Rv->value;
+		else if (op == TOKEN_GEQ)	e->value = Lv->value >= Rv->value;
+		else __builtin_unreachable();
+	}
+	break;
+	}
+
+case EXPR_INDEX:
+	// LVALUE is ok
+	{
+	if (!expect_or(!eval, e->pos, "cannot evaluate an indexing operation in a constant expression.\n")) break;
+	type_t *base  = type_check_expr(e->binary.L, stk, &type_any, RVALUE, e2t, up, eval);
+	e->binary.L = decay_expr(base, e->binary.L, &base, e2t, up);
+	if (!expect_or(base->kind == TYPE_PTR,
+			e->pos, "attempt to index something that does not support indexing.\n")) break;
+	if (!expect_or(compatible_type(base->array_t.base, base->array_t.base, e),
+			e->pos, "indexed value type mismatches what is expected here.\n")) break;
+	type_check_expr(e->binary.R, stk, &type_int64, RVALUE, e2t, up, eval);
+	type = base->array_t.base;
+	break;
+	}
+
+case EXPR_INITLIST:
+	{
+	if (!expect_or(c == RVALUE,
+			e->pos, "cannot assign to an initializer list.\n")) break;
+	if (!expect_or(expecting->kind == TYPE_ARRAY,
+			e->pos, "can only initialize an array with an initializer list.\n")) break;
+	for (expr **start = scratch_start(e->call.args), **v = start; v != scratch_end(e->call.args); v++) {
+		if (!expect_or(0 <= v-start && v-start < (ptrdiff_t)expecting->array_t.checked_count,
+				v[0]->pos, "trying to assign a value out of bounds of the array.\n")) break;
+		type_check_expr(*v, stk, expecting->array_t.base, RVALUE, e2t, up, true);
+	}
+	type = expecting;
+	break;
+	}
+
+case EXPR_UNARY:
+	{
+	if (!expect_or(c == RVALUE,
+			e->pos, "cannot assign to result of a function call.\n")) break;
+	type_t *t = type_check_expr(e->unary.operand, stk, expecting, RVALUE, e2t, up, eval);
+	if (!expect_or(same_type(t, &type_bool),
+			e->pos, "cannot find the boolean complement of non-boolean.\n")) break;
+	type = t;
+	if (!eval) break;
+	if (e->unary.op == '!') {
+		e->kind = EXPR_INT;
+		e->value = !e->unary.operand->value;
+	}
+	break;
+	}
+
+case EXPR_CALL:
+	{
+	if (!expect_or(!eval, e->pos, "cannot evaluate a function call in a constant expression.\n")) break;
+	if (!expect_or(c == RVALUE, e->pos, "cannot assign to result of a function call.\n")) break;
+	type_t *operand = type_check_expr(e->call.operand, stk, &type_any, RVALUE, e2t, up, eval);
+	if (!expect_or(operand->kind == TYPE_FUNC,
+			e->pos, "attempt to call a non-callable:\n")) break;
+	scratch_arr params = operand->func_t.params;
+	expr **arg = scratch_start(e->call.args);
+	if (!expect_or(scratch_len(e->call.args) / sizeof(expr*) == scratch_len(params) / sizeof(func_arg),
+			e->pos, "function call with the wrong number of arguments provided.\n"))
+		break;
+	for (func_arg *param = scratch_start(params); param != scratch_end(params); param++, arg++)
+		type_check_expr(*arg, stk, param->type, RVALUE, e2t, up, eval);
+	type = operand->func_t.ret_t;
+	break;
+	}
+
+case EXPR_NONE:
+	break;
+default:
+	assert(0);
+	}
+	expect_or(compatible_type(type, expecting, e), e->pos, "the type of this expression mismatches what is expected here.\n");
 	// since each expression is only created once, pointer equality is enough
 	map_entry *asso = map_add(e2t, (key_t) e, intern_hash, up);
 	asso->k = (key_t) e;
@@ -119,28 +217,28 @@ static scope *type_check_stmt(stmt *s, type_t *surrounding, scope *sc, scope_sta
 {
 	switch (s->kind) {
 	case STMT_EXPR:
-		type_check_expr(s->e, stk, RVALUE, e2t, up);
+		type_check_expr(s->e, stk, &type_any, RVALUE, e2t, up, false);
 		return sc;
 	case STMT_ASSIGN:
-		expect_or(same_type(type_check_expr(s->assign.L, stk, LVALUE, e2t, up),
-				    type_check_expr(s->assign.R, stk, RVALUE, e2t, up)),
-				"attempt to assign between values of different type");
+		type_check_expr(s->assign.R, stk,
+				type_check_expr(s->assign.L, stk, &type_any, LVALUE, e2t, up, false),
+				RVALUE, e2t, up, false);
 		return sc;
 	case STMT_DECL:
 		type_check_decl(s->d, sc, stk, e2t, up);
 		return sc;
 	case STMT_RETURN:
-		expect_or(same_type(type_check_expr(s->e, stk, RVALUE, e2t, up), surrounding),
-				s->e->pos, "the return value mismatches the return type.\n");
+		type_check_expr(s->e, stk, surrounding, RVALUE, e2t, up, false);
 		return sc;
 	case STMT_IFELSE:
-		if (!expect_or(same_type(type_check_expr(s->ifelse.cond, stk, RVALUE, e2t, up), &type_bool),
-				s->ifelse.cond->pos, "the condition to this if statement is not a boolean.\n"))
-			return sc;
+		type_check_expr(s->ifelse.cond, stk, &type_bool, RVALUE, e2t, up, false);
 		sc = type_check_stmt(s->ifelse.s_then, surrounding, sc, stk, e2t, up);
 		if (s->ifelse.s_else)
 			sc = type_check_stmt(s->ifelse.s_else, surrounding, sc, stk, e2t, up);
 		return sc;
+	case STMT_WHILE:
+		type_check_expr(s->ifelse.cond, stk, &type_bool, RVALUE, e2t, up, false);
+		return type_check_stmt(s->ifelse.s_then, surrounding, sc, stk, e2t, up);
 	case STMT_NONE:
 		return sc;
 	case STMT_BLOCK:
@@ -162,16 +260,26 @@ void type_check_stmt_block(stmt_block blk, type_t *surrounding, scope *sc, scope
 	}
 }
 
+static void complete_type(type_t *t, scope_stack_l *stk, map *e2t, allocator *up)
+{
+	switch (t->kind) {
+	case TYPE_ARRAY:
+		type_check_expr(t->array_t.unchecked_count, stk, &type_int64, RVALUE, e2t, up, true);
+		t->array_t.checked_count = t->array_t.unchecked_count->value;
+		break;
+	default:
+		// nop
+		break;
+	}
+}
+
 void type_check_decl(decl_idx i, scope *sc, scope_stack_l *stk, map *e2t, allocator *up)
 {
 	decl *d = idx2decl(i);
+	complete_type(d->type, stk, e2t, up);
 	switch (d->kind) {
-		type_t *type;
 	case DECL_VAR:
-		type = type_check_expr(d->var_d.init, stk, RVALUE, e2t, up);
-		expect_or(same_type(d->type, type),
-				d->pos, "initializer type does not match target type.\n");
-		// assert(!same_type(type, &type_bool) && "not implemented");
+		type_check_expr(d->var_d.init, stk, d->type, RVALUE, e2t, up, false);
 		break;
 	case DECL_FUNC:
 		assert(d->type->kind == TYPE_FUNC);

@@ -10,41 +10,46 @@ static int _string_cmp2(key_t L, key_t R) { return L-R; }
 static void resolve_expr(expr *e, scope_stack_l *list, allocator *up, allocator *final)
 {
 	switch (e->kind) {
-	case EXPR_NAME:
-		{
-		size_t h = intern_hash(e->name);
-		map_entry *name = map_find(&list->scope->refs, e->name, h, _string_cmp2);
-		for (scope_stack_l *it = list->next; !name; it = it->next) {
-			if (!expect_or(it != NULL,
-					e->pos, "the identifier ", e->name,
-					" is used but never defined.\n"))
-				return;
-			name = map_find(&it->scope->refs, e->name, h, _string_cmp2);
-		}
-		}
-		break;
-	case EXPR_INT:
-	case EXPR_BOOL:
-		// nop
-		break;
-	case EXPR_CALL:
-		resolve_expr(e->call.operand, list, up, final);
-		for (expr **it = scratch_start(e->call.args), **end = scratch_end(e->call.args);
-				it != end; it++)
-			resolve_expr(*it, list, up, final);
-		break;
-	case EXPR_ADD:
-	case EXPR_CMP:
-		resolve_expr(e->binary.L, list, up, final);
-		resolve_expr(e->binary.R, list, up, final);
-		break;
-	case EXPR_UNARY:
-		resolve_expr(e->unary.operand, list, up, final);
-		break;
-	case EXPR_NONE:
-		break;
-	default:
-		assert(0);
+case EXPR_NAME:
+	{
+	size_t h = intern_hash(e->name);
+	map_entry *name = map_find(&list->scope->refs, e->name, h, _string_cmp2);
+	for (scope_stack_l *it = list->next; !name; it = it->next) {
+		if (!expect_or(it != NULL,
+				e->pos, "the identifier ", e->name,
+				" is used but never defined.\n"))
+			return;
+		name = map_find(&it->scope->refs, e->name, h, _string_cmp2);
+	}
+	}
+	break;
+case EXPR_INT:
+case EXPR_BOOL:
+	// nop
+	break;
+case EXPR_CALL:
+	resolve_expr(e->call.operand, list, up, final);
+	for (expr **it = scratch_start(e->call.args), **end = scratch_end(e->call.args);
+			it != end; it++)
+		resolve_expr(*it, list, up, final);
+	break;
+case EXPR_ADD:
+case EXPR_CMP:
+case EXPR_INDEX:
+	resolve_expr(e->binary.L, list, up, final);
+	resolve_expr(e->binary.R, list, up, final);
+	break;
+case EXPR_UNARY:
+	resolve_expr(e->unary.operand, list, up, final);
+	break;
+case EXPR_INITLIST:
+	for (expr **init = scratch_start(e->call.args); init != scratch_end(e->call.args); init++)
+		resolve_expr(*init, list, up, final);
+	break;
+case EXPR_NONE:
+	break;
+default:
+	assert(0);
 	}
 }
 

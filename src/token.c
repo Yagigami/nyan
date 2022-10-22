@@ -69,7 +69,9 @@ int token_init(const char *path, allocator *up, allocator *names)
 			} while (0)
 		#define KW(name) INSERT(kw_##name, #name)
 		KW(func);
+		KW(int8);
 		KW(int32);
+		KW(int64);
 		KW(bool);
 		KW(false);
 		KW(true);
@@ -124,8 +126,9 @@ again:
 	CASE2('>', '=', TOKEN_GEQ);
 	CASE2('!', '=', TOKEN_NEQ);
 	#undef CASE2
+	case '&':
 	case '+': case '-': // support += later
-	case ',': case ';': case ':': case '(': case ')': case '{': case '}': // always just 1 token
+	case '[': case ']': case ',': case ';': case ':': case '(': case ')': case '{': case '}': // always just 1 token
 		break;
 	case 'A' ... 'Z': case 'a' ... 'z': case '_':
 		next.kind = TOKEN_NAME;

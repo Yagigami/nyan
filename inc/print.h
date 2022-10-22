@@ -23,6 +23,7 @@ bool expect_or(bool condition, ...);
 #define expect_or(cond, ...) ((cond) ? true: (print(stderr, ## __VA_ARGS__, "\n"), ast_one_more_error(), false)) // STUPID PRECEDENCE RULES LOL
 
 typedef struct print_int { ptrdiff_t v; } print_int;
+typedef struct print_hex { ptrdiff_t v; } print_hex;
 
 typedef enum printable {
 	P_STRING,

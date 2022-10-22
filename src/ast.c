@@ -95,7 +95,7 @@ expr *parse_expr_atom(allocator *up)
 expr *parse_expr_postfix(allocator *up)
 {
 	expr *operand = parse_expr_atom(up);
-	while (token_match('(')) {
+	while (true) if (token_match('(')) {
 		dyn_arr args;
 		expr *call = ALLOC(up, sizeof *call, 8).addr;
 		call->pos = token_pos();
@@ -110,7 +110,16 @@ expr *parse_expr_postfix(allocator *up)
 		call->call.operand = operand;
 		call->call.args = scratch_from(&args, ast.temps, up);
 		operand = call;
-	}
+	} else if (token_match('[')) {
+		expr *deref = ALLOC(up, sizeof *deref, alignof *deref).addr;
+		deref->kind = EXPR_INDEX;
+		deref->pos = token_pos();
+		deref->binary.L = operand;
+		deref->binary.R = parse_expr(up);
+		if (!token_expect(']')) goto err;
+		operand = deref;
+	} else break;
+err:
 	return operand;
 }
 
@@ -170,7 +179,22 @@ expr *parse_expr_cmp(allocator *up)
 
 expr *parse_expr(allocator *up)
 {
-	return parse_expr_cmp(up);
+	// `{ 1, "hello" } + v` will never happen, so there is no need
+	// to go all the way down to parse_expr_atom when parsing an
+	// initializer list
+	if (token_match('{')) {
+		expr *init = ALLOC(up, sizeof *init, alignof *init).addr;
+		init->kind = EXPR_NONE;
+		dyn_arr init_list; dyn_arr_init(&init_list, 0, ast.temps);
+		do {
+			expr *field = parse_expr(up);
+			dyn_arr_push(&init_list, &field, sizeof field, ast.temps);
+		} while (token_match(','));
+		init->call.args = scratch_from(&init_list, ast.temps, up);
+		token_expect('}');
+		init->kind = EXPR_INITLIST;
+		return init;
+	} else return parse_expr_cmp(up);
 }
 
 void parse_type_params(dyn_arr *p, allocator *up)
@@ -193,8 +217,12 @@ type_t *parse_type_prim(allocator *up)
 	type_t *prim = ALLOC(up, sizeof *prim, 8).addr;
 	if (token_match_kw(tokens.kw_func)) {
 		prim->kind = TYPE_FUNC;
+	} else if (token_match_kw(tokens.kw_int8)) {
+		prim->kind = TYPE_INT8;
 	} else if (token_match_kw(tokens.kw_int32)) {
 		prim->kind = TYPE_INT32;
+	} else if (token_match_kw(tokens.kw_int64)) {
+		prim->kind = TYPE_INT64;
 	} else if (token_match_kw(tokens.kw_bool)) {
 		prim->kind = TYPE_BOOL;
 	} else {
@@ -207,7 +235,15 @@ type_t *parse_type_prim(allocator *up)
 
 type_t *parse_type_target(type_t *base, allocator *up)
 {
-	(void) up;
+	while (token_match('[')) {
+		type_t *tgt = ALLOC(up, sizeof *tgt, alignof *tgt).addr;
+		tgt->kind = TYPE_ARRAY;
+		tgt->array_t.base = base;
+		tgt->array_t.unchecked_count = parse_expr(up);
+		if (!token_expect(']')) goto err;
+		base = tgt;
+	}
+err:
 	return base;
 }
 
