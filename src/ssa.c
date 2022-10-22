@@ -172,7 +172,13 @@ case EXPR_NAME:
 		ent->k = name;
 		ent->v = number;
 	}
-	return ent->v;
+	if (categ == RVALUE)
+		return ent->v;
+	else {
+		number = new_local(&f->locals, linfo_tbl[TYPE_INT64], a);
+		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ADDRESS, number, ent->v}, sizeof(ssa_instr), a);
+		return number;
+	}
 	}
 
 case EXPR_CALL:
@@ -249,11 +255,7 @@ case EXPR_UNARY:
 case EXPR_ADDRESS:
 	{
 	// FIXME: sus
-	ssa_ref of = ir3_expr(f, e->unary.operand, e2t, stk, a, RVALUE);
-	// FIXME: pointer type
-	number = new_local(&f->locals, linfo_tbl[TYPE_INT64], a);
-	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ADDRESS, number, of }, sizeof(ssa_instr), a);
-	return number;
+	return ir3_expr(f, e->unary.operand, e2t, stk, a, LVALUE);
 	}
 
 case EXPR_INDEX:
@@ -268,14 +270,13 @@ case EXPR_INDEX:
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_MUL, offset, index, scale }, sizeof(ssa_instr), a);
 	// not making SSA
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ADD, offset, offset, base }, sizeof(ssa_instr), a);
-	ssa_ref value = new_local(&f->locals, linfo, a);
 	if (categ == RVALUE) {
+		ssa_ref value = new_local(&f->locals, linfo, a);
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_LOAD, value, offset }, sizeof(ssa_instr), a);
+		return value;
 	} else {
-		// FIXME: not like this
-		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_STORE, offset, value }, sizeof(ssa_instr), a);
+		return offset;
 	}
-	return value;
 	}
 
 case EXPR_INITLIST:
@@ -312,9 +313,10 @@ case DECL_VAR:
 	assert(!map_find(&stk->ast2num, d->name, intern_hash(d->name), _string_cmp2));
 	map_entry *e = map_add(&stk->ast2num, d->name, intern_hash, a);
 	e->k = d->name;
-	ssa_ref number = new_local(&f->locals, type2linfo(d->type), a);
-	e->v = number;
-	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_COPY, number, val }, sizeof(ssa_instr), a);
+	e->v = val;
+	// ssa_ref number = new_local(&f->locals, type2linfo(d->type), a);
+	// e->v = number;
+	// dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_COPY, number, val }, sizeof(ssa_instr), a);
 	}
 	break;
 default:
@@ -331,9 +333,10 @@ case STMT_DECL:
 	break;
 case STMT_ASSIGN:
 	{
-	ssa_ref R = ir3_expr(f, s->assign.R, e2t, stk, a, LVALUE);
+	ssa_ref R = ir3_expr(f, s->assign.R, e2t, stk, a, RVALUE);
 	ssa_ref L = ir3_expr(f, s->assign.L, e2t, stk, a, LVALUE);
-	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_COPY, L, R }, sizeof(ssa_instr), a);
+	ssa_instr *prev = f->ins.end - sizeof *prev;
+	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_STORE, R, L }, sizeof(ssa_instr), a);
 	break;
 	}
 case STMT_RETURN:

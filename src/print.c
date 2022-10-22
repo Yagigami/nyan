@@ -100,7 +100,7 @@ static int fprint_ir3_instr(FILE *to, const ssa_instr *i, int *extra_offset, con
 	case SSA_BOOL: return fprintf(to, "%%%hhx:%s = %db\n", i->to, T, i->L);
 	case SSA_ARG: return fprintf(to, "%%%hhx:%s = args.%hhx\n", i->to, T, i->L);
 	case SSA_LOAD: return fprintf(to, "%%%hhx:%s = load %%%hhx\n", i->to, T, i->L);
-	case SSA_STORE: return fprintf(to, "%%%hhx:%s = store %%%hhx\n", i->to, T, i->L);
+	case SSA_STORE: return fprintf(to, "store:%s %%%hhx, %%%hhx\n", T, i->to, i->L);
 	case SSA_GLOBAL_REF: return fprintf(to, "%%%hhx:%s = global.%x\n", i->to, T, i->L);
 	case SSA_MEMCOPY: return fprintf(to, "%%%hhx:%s = memcopy(%%%hhx)\n", i->to, T, i->L);
 	case SSA_BOOL_NEG: return fprintf(to, "%%%hhx:%s = bool neg %%%hhx\n", i->to, T, i->L);
