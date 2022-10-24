@@ -376,7 +376,9 @@ void test_ast(void)
 	scope global;
 	resolve_refs(module, &global, ast.temps, &perma.base);
 	map e2t;
-	type_check(module, &global, &e2t, gpa);
+	type_init(gpa);
+	type_check(module, &global, &e2t, &perma.base);
+	type_fini();
 
 	map_fini(&e2t, gpa);
 	scope_fini(&global, gpa);

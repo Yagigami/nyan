@@ -231,7 +231,6 @@ static byte *lea_rip(byte *p, enum x86_64_reg res, idx_t disp32, int bytes)
 	if (bytes == 8 || res >= R8) *p++ = rex(bytes==8, res>>3, 0, 0);
 	*p++ = 0x8d;
 	*p++ = modrm(0, RBP, res);
-	*p++ = sib(0, 0, 0);
 	return imm32(p, disp32);
 }
 
@@ -438,7 +437,7 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 	return scratch_len(dst->ins);
 }
 
-gen_module gen_x86_64(ir3_module m2ac, dyn_arr *names, allocator *a)
+gen_module gen_x86_64(ir3_module m2ac, allocator *a)
 {
 	gen_module out;
 	out.code_size = 0;
@@ -447,12 +446,9 @@ gen_module gen_x86_64(ir3_module m2ac, dyn_arr *names, allocator *a)
 	dyn_arr_init(&dest, 0*sizeof(gen_sym), a);
 	dyn_arr_init(&refs, 0*sizeof(gen_reloc), a);
 	dyn_arr_init(&rodata, 0, a);
-	map_entry *base = names->buf.addr;
 	for (ir3_sym *prev = scratch_start(m2ac), *end = scratch_end(m2ac);
-			prev != end; prev++, base++) {
+			prev != end; prev++) {
 		gen_sym *new = dyn_arr_push(&dest, NULL, sizeof *new, a);
-		new->name = (char*) base->k;
-		new->len = (idx_t) base->v;
 		if (prev->kind == IR3_BLOB) {
 			idx_t at = dyn_arr_size(&rodata);
 			idx_t aligned = (at + prev->align - 1) / prev->align * prev->align;
@@ -479,8 +475,6 @@ void gen_fini(gen_module *mod, allocator *a)
 		if (sym->kind == GEN_CODE) {
 			scratch_fini(sym->ins, a);
 			scratch_fini(sym->refs, a);
-		} else {
-			// ...
 		}
 	}
 	scratch_fini(mod->syms, a);

@@ -18,8 +18,6 @@ typedef struct gen_sym {
 		scratch_arr ins; // bytes
 	};
 	scratch_arr refs; // array of gen_reloc lo=offset in symbol, hi=referenced index
-	char *name;
-	idx_t len;
 	enum { GEN_CODE, GEN_RODATA } kind;
 } gen_sym;
 
@@ -30,7 +28,7 @@ typedef struct gen_module {
 	idx_t num_refs;
 } gen_module;
 
-gen_module gen_x86_64(ir3_module m2ac, dyn_arr *names, allocator *a);
+gen_module gen_x86_64(ir3_module m2ac, allocator *a);
 void gen_fini(gen_module *mod, allocator *a);
 
 #endif /* CROUTE_GEN_X86_64_H */

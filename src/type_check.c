@@ -4,6 +4,10 @@
 #include <stdbool.h>
 
 
+static struct type_checker_state {
+	allocator *temps;
+} types;
+
 static int _string_cmp2(ident_t L, ident_t R) { return L - R; }
 
 // TODO: temporary
@@ -65,7 +69,7 @@ static expr *decay_expr(type_t *t, expr *e, type_t **new, map *e2t, allocator *u
 		d->kind = TYPE_PTR;
 		d->array_t.base = t->array_t.base;
 		*new = d;
-		map_entry *asso = map_add(e2t, (key_t) e, intern_hash, up);
+		map_entry *asso = map_add(e2t, (key_t) e, intern_hash, types.temps);
 		asso->k = (key_t) e;
 		asso->v = (val_t) d;
 	}
@@ -202,7 +206,7 @@ default:
 	}
 	expect_or(compatible_type(type, expecting, e), e->pos, "the type of this expression mismatches what is expected here.\n");
 	// since each expression is only created once, pointer equality is enough
-	map_entry *asso = map_add(e2t, (key_t) e, intern_hash, up);
+	map_entry *asso = map_add(e2t, (key_t) e, intern_hash, types.temps);
 	asso->k = (key_t) e;
 	asso->v = (val_t) type;
 	return type;
@@ -296,7 +300,7 @@ void type_check_decl(decl_idx i, scope *sc, scope_stack_l *stk, map *e2t, alloca
 
 void type_check(module_t module, scope *top, map *expr2type, allocator *up)
 {
-	map_init(expr2type, 0, up);
+	map_init(expr2type, 0, types.temps);
 	decl_idx *decl_it = scratch_start(module)  , *decl_end = scratch_end(module   );
 	scope *scope_it   = scratch_start(top->sub), *scope_end = scratch_end(top->sub);
 	assert(decl_end - decl_it == scope_end - scope_it);
@@ -305,3 +309,11 @@ void type_check(module_t module, scope *top, map *expr2type, allocator *up)
 		type_check_decl(*decl_it, scope_it, &bottom, expr2type, up);
 }
 
+void type_init(allocator *temps)
+{
+	types.temps = temps;
+}
+
+void type_fini(void)
+{
+}

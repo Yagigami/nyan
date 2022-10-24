@@ -132,7 +132,6 @@ int elf_object_from(const gen_module *mod, const char *path, const dyn_arr *name
 	shdr[SECTION_STRTAB].sh_entsize = 0;
 
 	size_t until_strtab = shdr[SECTION_STRTAB].sh_offset - shdr[SECTION_SYMTAB].sh_offset;
-	// dyn_arr_push(&out, scratch_start(mod->rodata), shdr[SECTION_RODATA].sh_size, a);
 	// TODO: could also just fill padding with 0s when there is any
 	memset(dyn_arr_push(&out, NULL, until_strtab, a), 0, until_strtab);
 	ehdr = out.buf.addr;
@@ -151,7 +150,6 @@ int elf_object_from(const gen_module *mod, const char *path, const dyn_arr *name
 		size_t idx = it - start;
 		ehdr = out.buf.addr;
 		shdr = out.buf.addr + ehdr->e_shoff;
-		assert((char*) n->k == it->name && (idx_t) n->v == it->len);
 		Elf64_Sym *sym = out.buf.addr + shdr[SECTION_SYMTAB].sh_offset + (1+idx) * sizeof *sym;
 		sym->st_name = strtab_offset;
 		strtab_offset += n->v + 1;
