@@ -33,7 +33,10 @@ static byte *imm32(byte *p, uint32_t i) { return imm16(imm16(p, i & 0xffff), i >
 
 static byte *emit_disp(byte *p, enum x86_64_reg r, enum x86_64_reg base, idx_t offset)
 {
-	if (-0x80 <= offset && offset < 0x80) {
+	if (offset == 0x0 && (base & 0x7) != RBP) {
+		*p++ = modrm(0, base, r);
+		return p;
+	} else if (-0x80 <= offset && offset < 0x80) {
 		*p++ = modrm(1, base, r);
 		return imm8(p, offset);
 	} else {
@@ -54,21 +57,31 @@ static byte opcode_anysize(byte opcode, int bytes)
 	return opcode;
 }
 
-static byte *load(byte *p, enum x86_64_reg to, idx_t offset, int bytes)
+static byte *load(byte *p, enum x86_64_reg to, enum x86_64_reg base, idx_t offset, int bytes)
 {
 	override_if16b(p, bytes);
 	if (bytes == 1 || bytes == 8 || to >= R8) *p++ = rex(bytes==8, to>>3, 0, 0);
 	*p++ = opcode_anysize(0x8b, bytes);
-	return emit_disp(p, to, RBP, offset);
+	return emit_disp(p, to, base, offset);
 }
 
-static byte *store(byte *p, enum x86_64_reg from, idx_t offset, int bytes)
+static byte *load_rbprel(byte *p, enum x86_64_reg to, idx_t offset, int bytes)
+{
+	return load(p, to, RBP, offset, bytes);
+}
+
+static byte *store(byte *p, enum x86_64_reg from, enum x86_64_reg base, idx_t offset, int bytes)
 {
 	override_if16b(p, bytes);
 	// if bytes == 1, you only need a REX if you are accessing registers other than ACDB, technically
 	if (bytes == 1 || bytes == 8 || from >= R8) *p++ = rex(bytes==8, from>>3, 0, 0);
 	*p++ = opcode_anysize(0x89, bytes);
-	return emit_disp(p, from, RBP, offset);
+	return emit_disp(p, from, base, offset);
+}
+
+static byte *store_rbprel(byte *p, enum x86_64_reg from, idx_t offset, int bytes)
+{
+	return store(p, from, RBP, offset, bytes);
 }
 
 static byte *addsub(byte *p, enum x86_64_reg L, enum x86_64_reg R, enum ssa_opcode opc, int bytes)
@@ -136,7 +149,7 @@ static byte *mov_imm32(byte *p, enum x86_64_reg r, idx_t imm)
 	return imm32(p, imm);
 }
 
-static byte *store_imm8(byte *p, idx_t offset, idx_t imm)
+static byte *store_rbprel_imm8(byte *p, idx_t offset, idx_t imm)
 {
 	*p++ = 0xc6;
 	if (-0x80 <= offset && offset < 0x80) {
@@ -257,8 +270,8 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 
 			case SSA_SET:
 				width = LINFO_GET_SIZE(linfo[i->L]);
-				p = load(p, RAX, locals[i->L], width);
-				p = load(p, RCX, locals[i->R], width);
+				p = load_rbprel(p, RAX, locals[i->L], width);
+				p = load_rbprel(p, RCX, locals[i->R], width);
 				p = cmp(p, RAX, RCX, width);
 				p = setcc_mem(p, locals[i->to], i[1].to);
 				i++;
@@ -266,8 +279,8 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 
 			case SSA_BR:
 				width = LINFO_GET_SIZE(linfo[i->L]);
-				p = load(p, RAX, locals[i->L], width);
-				p = load(p, RCX, locals[i->R], width);
+				p = load_rbprel(p, RAX, locals[i->L], width);
+				p = load_rbprel(p, RCX, locals[i->R], width);
 				p = cmp(p, RAX, RCX, width);
 				*p++ = 0x0f;
 				*p++ = 0x80 | bc2cc[i->to];
@@ -281,8 +294,8 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 
 			case SSA_COPY:
 				width = LINFO_GET_SIZE(linfo[i->L]);
-				p = load(p, RAX, locals[i->L], width);
-				p = store(p, RAX, locals[i->to], width);
+				p = load_rbprel(p, RAX, locals[i->L], width);
+				p = store_rbprel(p, RAX, locals[i->to], width);
 				break;
 
 			case SSA_LABEL:
@@ -290,12 +303,12 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 				break;
 
 			case SSA_BOOL:
-				p = store_imm8(p, locals[i->to], i->L);
+				p = store_rbprel_imm8(p, locals[i->to], i->L);
 				break;
 
 			case SSA_BOOL_NEG:
 				width = LINFO_GET_SIZE(linfo[i->R]);
-				p = load(p, RDX, locals[i->R], width);
+				p = load_rbprel(p, RDX, locals[i->R], width);
 				p = test(p, RDX, RDX, width);
 				p = setcc_mem(p, locals[i->to], SSAB_EQ); // test dl, dl gives ZF iff dl == 0
 				break;
@@ -303,31 +316,31 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 			case SSA_IMM:
 				width = LINFO_GET_SIZE(linfo[i->to]);
 				p = mov_imm32(p, RAX, i[1].v);
-				p = store(p, RAX, locals[i->to], width);
+				p = store_rbprel(p, RAX, locals[i->to], width);
 				i++; // because of the extension
 				break;
 				
 			case SSA_ADD: case SSA_SUB:
 				width = LINFO_GET_SIZE(linfo[i->to]);
-				p = load(p, RAX, locals[i->to], width);
-				p = load(p, RDX, locals[i->R ], width);
+				p = load_rbprel(p, RAX, locals[i->to], width);
+				p = load_rbprel(p, RDX, locals[i->R ], width);
 				p = addsub(p, RAX, RDX, i->kind, width);
-				p = store(p, RAX, locals[i->to], width);
+				p = store_rbprel(p, RAX, locals[i->to], width);
 				break;
 
 			case SSA_MUL:
 				width = LINFO_GET_SIZE(linfo[i->to]);
-				p = load(p, RAX, locals[i->to], width);
-				p = load(p, RCX, locals[i->R ], width);
+				p = load_rbprel(p, RAX, locals[i->to], width);
+				p = load_rbprel(p, RCX, locals[i->R ], width);
 				p = umul(p, RCX, width);
-				p = store(p, RAX, locals[i->to], width);
+				p = store_rbprel(p, RAX, locals[i->to], width);
 				break;
 
 			case SSA_MEMCOPY:
 				width = LINFO_GET_SIZE(linfo[i->to]);
 				// slow and dirty repne movsb
-				p = load(p, RDI, locals[i->to], 8); // assuming pointers are 8-bytes
-				p = load(p, RSI, locals[i->L ], 8);
+				p = load_rbprel(p, RDI, locals[i->to], 8); // assuming pointers are 8-bytes
+				p = load_rbprel(p, RSI, locals[i->L ], 8);
 				p = mov_imm32(p, RCX, width);
 				*p++ = 0xf2;
 				*p++ = 0xa4;
@@ -335,61 +348,62 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 
 			case SSA_ADDRESS:
 				width = LINFO_GET_SIZE(linfo[i->to]);
+				assert(width == 8);
 				p = lea(p, RAX, RBP, locals[i->L], width);
-				p = store(p, RAX, locals[i->to], width);
+				p = store_rbprel(p, RAX, locals[i->to], width);
 				break;
 
 			case SSA_LOAD:
 				width = LINFO_GET_SIZE(linfo[i->to]);
-				p = load(p, RAX, locals[i->L], width);
-				p = store(p, RAX, locals[i->to], width);
+				p = load_rbprel(p, RAX, locals[i->L], 8);
+				p = load(p, RSI, RAX, 0, width);
+				p = store_rbprel(p, RSI, locals[i->to], width);
 				break;
 
 			case SSA_STORE: // .to -> .L
 				width = LINFO_GET_SIZE(linfo[i->to]);
-				p = load(p, RAX, locals[i->to], width);
-				p = store(p, RAX, locals[i->L], width);
+				p = load_rbprel(p, RAX, locals[i->to], width);
+				p = load_rbprel(p, RSI, locals[i->L], 8);
+				p = store(p, RAX, RSI, 0, width);
 				break;
 
 			case SSA_CALL:
 				{
 				assert(i->R < 6);
 				idx_t ratio = sizeof(ssa_extension) / sizeof(ssa_ref);
-				idx_t num_ext = (i->R + ratio - 1) / ratio;
+				idx_t num_ext = (i->R + ratio - 1) / ratio + 1;
 				// little endian things
 				for (ssa_ref arg = 0; arg < i->R; arg++) {
-					ssa_extension ext = i[1 + arg/ratio].v;
+					ssa_extension ext = i[2 + arg/ratio].v;
 					idx_t shift = 8 * (arg % ratio);
 					ssa_ref id = (ext >> shift) & ((1L << (8 * sizeof id)) - 1);
-					p = load(p, sysv_arg[arg], locals[id], LINFO_GET_SIZE(linfo[id]));
+					p = load_rbprel(p, sysv_arg[arg], locals[id], LINFO_GET_SIZE(linfo[id]));
 				}
 				*p++ = 0xe8;
 				idx_t offset = dyn_arr_size(&ins) + p - buf;
-				gen_reloc r = { offset, locals[i->L] };
+				gen_reloc r = { offset, i[1].v };
 				dyn_arr_push(&refs, &r, sizeof r, a);
 				p = imm32(p, 0);
-				p = store(p, RAX, locals[i->to], LINFO_GET_SIZE(linfo[i->to]));
+				p = store_rbprel(p, RAX, locals[i->to], LINFO_GET_SIZE(linfo[i->to]));
 				i += num_ext;
 				}
 				break;
 
 			case SSA_GLOBAL_REF:
+				{
 				width = LINFO_GET_SIZE(linfo[i->to]);
-				locals[i->to] = i->L;
-				if (width) {
-					assert(width == 8);
-					p = lea_rip(p, RAX, 0, width);
-					// reloc is at the last 4 bytes
-					idx_t offset = dyn_arr_size(&ins) + p - buf - 4;
-					gen_reloc r = { offset, i->L }; // rip relative addressing is like direct call for the addend
-					dyn_arr_push(&refs, &r, sizeof r, a);
-					p = store(p, RAX, locals[i->to], width);
-				}
+				assert(width == 8);
+				p = lea_rip(p, RAX, 0, width);
+				idx_t offset = dyn_arr_size(&ins) + p - buf - 4;
+				gen_reloc r = { offset, i->L };
+				dyn_arr_push(&refs, &r, sizeof r, a);
+				p = store_rbprel(p, RAX, locals[i->to], width);
 				break;
+				}
 
 			case SSA_RET:
 				width = LINFO_GET_SIZE(linfo[i->to]);
-				p = load(p, RAX, locals[i->to], width);
+				p = load_rbprel(p, RAX, locals[i->to], width);
 				p = addsubimm(p, RSP, stack_space, SSA_ADD, 8);
 				p = pop64(p, RBP);
 				*p++ = 0xc3;
@@ -399,7 +413,7 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 				assert(i->L < 6);
 				width = LINFO_GET_SIZE(linfo[i->to]);
 				// sysV abi: int registers rdi>rsi>rdx>rcx>r8>r9
-				p = store(p, sysv_arg[i->L], locals[i->to], width);
+				p = store_rbprel(p, sysv_arg[i->L], locals[i->to], width);
 				break;
 
 			default:
@@ -424,7 +438,7 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 	return scratch_len(dst->ins);
 }
 
-gen_module gen_x86_64(ir3_module m2ac, allocator *a)
+gen_module gen_x86_64(ir3_module m2ac, dyn_arr *names, allocator *a)
 {
 	gen_module out;
 	out.code_size = 0;
@@ -432,17 +446,24 @@ gen_module gen_x86_64(ir3_module m2ac, allocator *a)
 	dyn_arr dest, refs, rodata;
 	dyn_arr_init(&dest, 0*sizeof(gen_sym), a);
 	dyn_arr_init(&refs, 0*sizeof(gen_reloc), a);
-	dyn_arr_init(&rodata, 0*sizeof(gen_reloc), a);
+	dyn_arr_init(&rodata, 0, a);
+	map_entry *base = names->buf.addr;
 	for (ir3_sym *prev = scratch_start(m2ac), *end = scratch_end(m2ac);
-			prev != end; prev++) {
+			prev != end; prev++, base++) {
+		gen_sym *new = dyn_arr_push(&dest, NULL, sizeof *new, a);
+		new->name = (char*) base->k;
+		new->len = (idx_t) base->v;
 		if (prev->kind == IR3_BLOB) {
 			idx_t at = dyn_arr_size(&rodata);
 			idx_t aligned = (at + prev->align - 1) / prev->align * prev->align;
-			byte *pad = dyn_arr_push(&rodata, NULL, aligned - at, a);
-			if (aligned - at) memset(pad, 0, aligned - at);
-			dyn_arr_push(&rodata, prev->m.addr, prev->m.size, a);
+			idx_t padding = aligned - at;
+			if (padding) memset(dyn_arr_push(&rodata, NULL, padding, a), 0, padding);
+			if (prev->m.size) dyn_arr_push(&rodata, prev->m.addr, prev->m.size, a);
+			new->kind = GEN_RODATA;
+			new->index = aligned;
+			new->size = prev->m.size;
 		} else {
-			gen_sym *new = dyn_arr_push(&dest, NULL, sizeof *new, a);
+			new->kind = GEN_CODE;
 			out.code_size += gen_symbol(new, &prev->f, a);
 			out.num_refs  += scratch_len(new->refs) / sizeof(gen_reloc);
 		}
@@ -455,9 +476,14 @@ gen_module gen_x86_64(ir3_module m2ac, allocator *a)
 void gen_fini(gen_module *mod, allocator *a)
 {
 	for (gen_sym *sym = scratch_start(mod->syms); sym != scratch_end(mod->syms); sym++) {
-		scratch_fini(sym->ins, a);
-		scratch_fini(sym->refs, a);
+		if (sym->kind == GEN_CODE) {
+			scratch_fini(sym->ins, a);
+			scratch_fini(sym->refs, a);
+		} else {
+			// ...
+		}
 	}
 	scratch_fini(mod->syms, a);
+	scratch_fini(mod->rodata, a);
 }
 

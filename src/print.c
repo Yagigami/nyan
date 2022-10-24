@@ -78,15 +78,17 @@ static int fprint_ir3_instr(FILE *to, const ssa_instr *i, int *extra_offset, con
 	case SSA_BR:
 		*extra_offset = sizeof *i;
 		return fprintf(to, "br(%s) %%%hhx:%s, %%%hhx, L%hhx, L%hhx\n", opc2s[i->to], i->L, T, i->R, i[1].L, i[1].R);
+	case SSA_GLOBAL_REF:
+		return fprintf(to, "%%%hhx:%s = global.%x\n", i->to, T, i->L);
 	case SSA_CALL:
 		{
 		int div = sizeof(ssa_extension)/sizeof(ssa_ref);
-		int num_ext = (i->R + div - 1) / div;
+		int num_ext = (i->R + div - 1) / div + 1;
 		*extra_offset = num_ext * sizeof *i;
-		int printed = fprintf(to, "%%%hhx:%s = call %%%hhx [", i->to, T, i->L);
+		int printed = fprintf(to, "%%%hhx:%s = call sym.%x [", i->to, T, i[1].v);
 		for (int arg = 0; arg < i->R; arg++) {
 			if (arg) printed += fprintf(to, ", ");
-			ssa_extension ext = i[1 + arg / div].v;
+			ssa_extension ext = i[2 + arg / div].v;
 			int shift = 8 * (arg % div);
 			ssa_ref id = (ext >> shift) & ((1L << (8 * sizeof id)) - 1);
 			printed += fprintf(to, "%%%hhx", id);
@@ -101,7 +103,6 @@ static int fprint_ir3_instr(FILE *to, const ssa_instr *i, int *extra_offset, con
 	case SSA_ARG: return fprintf(to, "%%%hhx:%s = args.%hhx\n", i->to, T, i->L);
 	case SSA_LOAD: return fprintf(to, "%%%hhx:%s = load %%%hhx\n", i->to, T, i->L);
 	case SSA_STORE: return fprintf(to, "store:%s %%%hhx, %%%hhx\n", T, i->to, i->L);
-	case SSA_GLOBAL_REF: return fprintf(to, "%%%hhx:%s = global.%x\n", i->to, T, i->L);
 	case SSA_MEMCOPY: return fprintf(to, "%%%hhx:%s = memcopy(%%%hhx)\n", i->to, T, i->L);
 	case SSA_BOOL_NEG: return fprintf(to, "%%%hhx:%s = bool neg %%%hhx\n", i->to, T, i->L);
 	case SSA_ADDRESS: return fprintf(to, "%%%hhx:%s = addressof %%%hhx\n", i->to, T, i->L);
@@ -143,7 +144,7 @@ static int fprint_ir3_func(FILE *to, const ir3_func *f)
 			*node = start; node != end; node++) {
 		printed += fprint_ir3_node(to, f, node, node - start);
 	}
-	return printed + fprintf(to, "\n");
+	return printed;
 }
 
 int _print_impl(FILE *to, uint64_t bitmap, ...)

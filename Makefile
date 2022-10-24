@@ -37,9 +37,9 @@ test: $(OUT)/$(TEST)
 GEN = simpler.o
 dump: $(OUT)/$(TEST)
 	$<
-	# objdump -Dwr -Mintel --insn-width=6 $(GEN)
-	# ld rt.o $(GEN)
-	# ./a.out
+	objdump -dwr -Mintel --insn-width=6 $(GEN)
+	ld rt.o $(GEN)
+	./a.out
 
 $(OUT)/$(TEST): $(OUT)/$(TEST).o $(OBJ)
 	@echo LD $<

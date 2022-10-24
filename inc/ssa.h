@@ -21,7 +21,7 @@ enum ssa_opcode
 	SSA_NONE = 0,
 	SSA_IMM, // 1 extension // little endian
 	SSA_ADD, SSA_SUB,
-	SSA_CALL, // to = call L (R args, ...) // 1 extension / 4 args
+	SSA_CALL, // to = call ext.0 [R args] // +1 ext/4 args
 	SSA_GLOBAL_REF, // TODO: go back to `ins.to = ref(ext.v)`
 	SSA_COPY,
 	SSA_RET,
@@ -89,7 +89,7 @@ typedef struct ir3_sym {
 } ir3_sym;
 
 typedef scratch_arr ir3_module;
-ir3_module convert_to_3ac(module_t ast, scope *enclosing, map *e2t, dyn_arr *globals, allocator *a);
+ir3_module convert_to_3ac(module_t ast, scope *enclosing, map *e2t, allocator *a);
 ir3_module convert_to_2ac(ir3_module m3ac, allocator *a);
 
 void bytecode_init(allocator *temps);
