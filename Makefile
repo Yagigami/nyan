@@ -34,7 +34,7 @@ all: $(OUT)/$(TEST) $(OUT)/$(BIN) dump
 test: $(OUT)/$(TEST)
 	$<
 
-GEN = simpler.o
+GEN = basic.o
 dump: $(OUT)/$(TEST)
 	$<
 	objdump -dwr -Mintel --insn-width=6 $(GEN)

@@ -138,7 +138,8 @@ int elf_object_from(const gen_module *mod, const char *path, const dyn_arr *name
 	shdr = out.buf.addr + ehdr->e_shoff;
 	assert(out.end == out.buf.addr + shdr[SECTION_NUM-1].sh_offset);
 
-	memcpy(out.buf.addr + shdr[SECTION_RODATA  ].sh_offset, scratch_start(mod->rodata), shdr[SECTION_RODATA].sh_size);
+	if (shdr[SECTION_RODATA].sh_size)
+		memcpy(out.buf.addr + shdr[SECTION_RODATA  ].sh_offset, scratch_start(mod->rodata), shdr[SECTION_RODATA].sh_size);
 	memcpy(out.buf.addr + shdr[SECTION_SHSTRTAB].sh_offset, shstrtab, size_shstrtab);
 	size_t strtab_offset = 1; // sentinel at 0
 	dyn_arr_push(&out, &(char){ '\0' }, 1, a);

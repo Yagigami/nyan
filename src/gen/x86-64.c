@@ -394,9 +394,10 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 				assert(width == 8);
 				p = lea_rip(p, RAX, 0, width);
 				idx_t offset = dyn_arr_size(&ins) + p - buf - 4;
-				gen_reloc r = { offset, i->L };
+				gen_reloc r = { offset, i[1].v };
 				dyn_arr_push(&refs, &r, sizeof r, a);
 				p = store_rbprel(p, RAX, locals[i->to], width);
+				i++;
 				break;
 				}
 

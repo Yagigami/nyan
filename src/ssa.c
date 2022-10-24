@@ -280,8 +280,8 @@ case EXPR_INITLIST:
 	dyn_arr_push(&bytecode.names, &name, sizeof name, a);
 	// FIXME: use ANYPTR somehow
 	ssa_ref local = new_local(&f->locals, linfo_tbl[TYPE_INT64]);
-	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_GLOBAL_REF, local, ref }, sizeof(ssa_instr), a);
-	// dyn_arr_push(&f->ins, &(ssa_instr){ .v=ref }, sizeof(ssa_extension), a);
+	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_GLOBAL_REF, local }, sizeof(ssa_instr), a);
+	dyn_arr_push(&f->ins, &(ssa_instr){ .v=ref }, sizeof(ssa_extension), a);
 	ssa_ref target = new_local(&f->locals, linfo);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_MEMCOPY, target, local }, sizeof(ssa_instr), a);
 	return target;
@@ -302,10 +302,9 @@ case DECL_VAR:
 	assert(!map_find(&stk->ast2num, d->name, intern_hash(d->name), _string_cmp2));
 	map_entry *e = map_add(&stk->ast2num, d->name, intern_hash, a);
 	e->k = d->name;
-	e->v = val;
-	// ssa_ref number = new_local(&f->locals, type2linfo(d->type), a);
-	// e->v = number;
-	// dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_COPY, number, val }, sizeof(ssa_instr), a);
+	ssa_ref number = new_local(&f->locals, type2linfo(d->type));
+	e->v = number;
+	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_COPY, number, val }, sizeof(ssa_instr), a);
 	}
 	break;
 default:
@@ -517,11 +516,11 @@ static void ir2_decl_func(ir3_func *dst, ir3_func *src, allocator *a)
 		for (const ssa_instr *instr = src->ins.buf.addr + node->begin, *end = src->ins.buf.addr + node->end; instr != end; instr++) switch (instr->kind) {
 		case SSA_IMM:
 		case SSA_SET:
+		case SSA_GLOBAL_REF:
 			dyn_arr_push(&dst->ins, instr, sizeof *instr, a);
 			instr++;
 			/* fallthrough */
 		case SSA_COPY:
-		case SSA_GLOBAL_REF:
 		case SSA_BOOL:
 		case SSA_RET:
 		case SSA_GOTO:
@@ -599,7 +598,7 @@ void test_3ac(void)
 	allocator *gpa = (allocator*)&malloc_allocator;
 	ast_init(gpa);
 	allocator_geom perma; allocator_geom_init(&perma, 16, 8, 0x100, gpa);
-	token_init("cr/simpler.cr", ast.temps, &perma.base);
+	token_init("cr/basic.cr", ast.temps, &perma.base);
 	allocator_geom just_ast; allocator_geom_init(&just_ast, 10, 8, 0x100, gpa);
 	module_t module = parse_module(&just_ast.base);
 	scope global;
@@ -627,7 +626,7 @@ void test_3ac(void)
 		dump_3ac(m2ac, bytecode.names.buf.addr);
 
 		gen_module gen = gen_x86_64(m2ac, gpa);
-		int e = elf_object_from(&gen, "simpler.o", &bytecode.names, gpa);
+		int e = elf_object_from(&gen, "basic.o", &bytecode.names, gpa);
 		if (e < 0) perror("objfile not generated");
 
 		gen_fini(&gen, gpa);

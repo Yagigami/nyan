@@ -79,7 +79,8 @@ static int fprint_ir3_instr(FILE *to, const ssa_instr *i, int *extra_offset, con
 		*extra_offset = sizeof *i;
 		return fprintf(to, "br(%s) %%%hhx:%s, %%%hhx, L%hhx, L%hhx\n", opc2s[i->to], i->L, T, i->R, i[1].L, i[1].R);
 	case SSA_GLOBAL_REF:
-		return fprintf(to, "%%%hhx:%s = global.%x\n", i->to, T, i->L);
+		*extra_offset = sizeof *i;
+		return fprintf(to, "%%%hhx:%s = global.%x\n", i->to, T, i[1].v);
 	case SSA_CALL:
 		{
 		int div = sizeof(ssa_extension)/sizeof(ssa_ref);

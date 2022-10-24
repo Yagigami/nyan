@@ -22,7 +22,7 @@ enum ssa_opcode
 	SSA_IMM, // 1 extension // little endian
 	SSA_ADD, SSA_SUB,
 	SSA_CALL, // to = call ext.0 [R args] // +1 ext/4 args
-	SSA_GLOBAL_REF, // TODO: go back to `ins.to = ref(ext.v)`
+	SSA_GLOBAL_REF, // `ins.to = ref(ext.v)`
 	SSA_COPY,
 	SSA_RET,
 	SSA_BOOL, // the value is embedded in the L field
