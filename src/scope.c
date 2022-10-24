@@ -157,13 +157,16 @@ void resolve_refs(module_t of, scope *to, allocator *up, allocator *final)
 	dyn_arr_init(&sub, n*sizeof(scope), up); // this one is special because we never reallocate
 	for (decl_idx *it = start; it != end; it++) {
 		decl *d = idx2decl(*it);
+		bool inserted;
+		map_entry *e = map_id(&to->refs, d->name, intern_hash, _string_cmp2, &inserted, up);
+		if (!expect_or(inserted,
+					d->pos, "the symbol ", d->name, " is redeclared here.\n",
+					scope2decl(e->v)->pos, "it was previously declared here.\n")) continue;
+		e->v = (val_t) d->type;
+	}
+	for (decl_idx *it = start; it != end; it++) {
+		decl *d = idx2decl(*it);
 		if (d->kind == DECL_FUNC) {
-			bool inserted;
-			map_entry *e = map_id(&to->refs, d->name, intern_hash, _string_cmp2, &inserted, up);
-			if (!expect_or(inserted,
-				d->pos, "the symbol ", d->name, " is redeclared here.\n",
-				scope2decl(e->v)->pos, "it was previously declared here.\n")) continue;
-			e->v = (val_t) d->type;
 			resolve_func(*it, &sub, &list, up, final);
 		} else {
 			if (!expect_or(false, "non-function declaration at top-level not implemented.\n")) continue;

@@ -14,22 +14,31 @@
 #include <assert.h>
 #include <stdbool.h>
 
+typedef struct ir3_reloc {
+	idx_t sym_in, offset_in;
+	ident_t ref;
+} ir3_reloc;
+
 static struct global_bytecode_state_t {
 	dyn_arr blob;
 	dyn_arr names;
+	dyn_arr relocs;
 	allocator *temps;
+	idx_t cur_idx;
 } bytecode;
 
 void bytecode_init(allocator *temps)
 {
 	dyn_arr_init(&bytecode.blob, 0, temps);
 	dyn_arr_init(&bytecode.names, 0, temps);
+	dyn_arr_init(&bytecode.relocs, 0, temps);
 	bytecode.temps = temps;
 }
 
 void bytecode_fini(void)
 {
 	dyn_arr_fini(&bytecode.names, bytecode.temps);
+	dyn_arr_fini(&bytecode.relocs, bytecode.temps);
 }
 
 static int _string_cmp2(key_t L, key_t R) { return L - R; }
@@ -85,9 +94,9 @@ static ssa_ref new_local(dyn_arr *locals, local_info linfo)
 	return num;
 }
 
-static ssa_extension ir3_expr(ir3_func *f, expr *e, map *e2t, map_stack *stk, value_category categ, allocator *a);
+static ident_t ir3_expr(ir3_func *f, expr *e, map *e2t, map_stack *stk, value_category categ, allocator *a);
 
-static ssa_ref ir3_expr_unary(ir3_func *f, expr *e, map *e2t, map_stack *stk, local_info linfo, value_category categ, allocator *a)
+static ident_t ir3_expr_unary(ir3_func *f, expr *e, map *e2t, map_stack *stk, local_info linfo, value_category categ, allocator *a)
 {
 	ssa_ref inner = ir3_expr(f, e->unary.operand, e2t, stk, categ, a);
 	ssa_ref number = new_local(&f->locals, linfo);
@@ -131,7 +140,7 @@ static map_entry global_name(ident_t name, size_t len, allocator *a)
 	return r;
 }
 
-ssa_extension ir3_expr(ir3_func *f, expr *e, map *e2t, map_stack *stk, value_category categ, allocator *a)
+ident_t ir3_expr(ir3_func *f, expr *e, map *e2t, map_stack *stk, value_category categ, allocator *a)
 {
 	map_entry *asso = map_find(e2t, (key_t) e, intern_hash((key_t) e), _string_cmp2); assert(asso);
 	type_t *type = (type_t*) asso->v;
@@ -157,9 +166,12 @@ case EXPR_NAME:
 	map_entry *ent = map_find(&stk->ast2num, name, h, _string_cmp2);
 	map_stack *it = stk;
 	while (!ent) {
-		it = it->next;
-		assert(it);
-		ent = map_find(&it->ast2num, name, h, _string_cmp2);
+		if (it->next) {
+			it = it->next;
+			ent = map_find(&it->ast2num, name, h, _string_cmp2);
+		} else {
+			return ~name;
+		}
 	}
 	if (categ == RVALUE)
 		return ent->v;
@@ -173,7 +185,7 @@ case EXPR_NAME:
 
 case EXPR_CALL:
 	{
-	ssa_extension func = ir3_expr(f, e->call.operand, e2t, stk, RVALUE, a);
+	ident_t func = ir3_expr(f, e->call.operand, e2t, stk, RVALUE, a);
 	idx_t num_args = scratch_len(e->call.args) / sizeof(expr*);
 	assert(num_args < (1L << (8*sizeof(ssa_ref))) - 1);
 	idx_t ratio = sizeof(ssa_extension) / sizeof(ssa_ref);
@@ -199,7 +211,11 @@ case EXPR_CALL:
 		memcpy(instr++, buf, sizeof buf);
 	// post after the arguments are evaluated
 	number = call->to = new_local(&f->locals, linfo);
-	dyn_arr_push(&f->ins, m.addr, (void*) instr - m.addr, a);
+	call = dyn_arr_push(&f->ins, m.addr, (void*) instr - m.addr, a);
+	static_assert(((ident_t) -1) < 0, "");
+	if (func < 0) {
+		dyn_arr_push(&bytecode.relocs, &(ir3_reloc){ .sym_in=bytecode.cur_idx, .offset_in=(void*) &call[1] - f->ins.buf.addr, .ref=~func }, sizeof(ir3_reloc), a);
+	}
 	DEALLOC(a, m);
 	return number;
 	}
@@ -472,6 +488,18 @@ static void ir3_decl_func(ir3_func *f, decl *d, map *e2t, map_stack *stk, scope*
 	last->end = dyn_arr_size(&f->ins);
 }
 
+static void patch_relocs(ir3_module mod, module_t ast, map *ast2num)
+{
+	decl_idx *base_decls = scratch_start(ast);
+	ir3_sym *base_syms = scratch_start(mod);
+	for (ir3_reloc *reloc = bytecode.relocs.buf.addr; reloc != bytecode.relocs.end; reloc++) {
+		ir3_sym *sym = &base_syms[reloc->sym_in];
+		map_entry *e = map_find(ast2num, reloc->ref, intern_hash(reloc->ref), _string_cmp2); assert(e);
+		ssa_instr *ins = sym->f.ins.buf.addr + reloc->offset_in;
+		ins->v = e->v;
+	}
+}
+
 // TODO:
 // 1. convert to SSA
 // 2. convert out of SSA
@@ -487,7 +515,7 @@ ir3_module convert_to_3ac(module_t ast, scope *enclosing, map *e2t, allocator *a
 		assert(d->kind == DECL_FUNC);
 		map_entry *e = map_add(&bottom.ast2num, d->name, intern_hash, a);
 		e->k = d->name;
-		e->v = dyn_arr_size(&bytecode.names) / sizeof(map_entry); // iter-start;
+		bytecode.cur_idx = e->v = dyn_arr_size(&bytecode.names) / sizeof(map_entry);
 		map_entry global = global_name(d->name, ident_len(d->name), a);
 		ir3_sym sym;
 		sym.kind = IR3_FUNC;
@@ -496,8 +524,10 @@ ir3_module convert_to_3ac(module_t ast, scope *enclosing, map *e2t, allocator *a
 		// TODO: mmap trickery to reduce the need to copy potentially large amounts of data
 		dyn_arr_push(&bytecode.blob, &sym, sizeof sym, bytecode.temps);
 	}
+	ir3_module out = scratch_from(&bytecode.blob, bytecode.temps, a);
+	patch_relocs(out, ast, &bottom.ast2num);
 	map_fini(&bottom.ast2num, a);
-	return scratch_from(&bytecode.blob, bytecode.temps, a);
+	return out;
 }
 
 static const enum ssa_branch_cc invert_cc[SSAB_NUM] = {
@@ -598,7 +628,7 @@ void test_3ac(void)
 	allocator *gpa = (allocator*)&malloc_allocator;
 	ast_init(gpa);
 	allocator_geom perma; allocator_geom_init(&perma, 16, 8, 0x100, gpa);
-	token_init("cr/basic.cr", ast.temps, &perma.base);
+	token_init("cr/simpler.cr", ast.temps, &perma.base);
 	allocator_geom just_ast; allocator_geom_init(&just_ast, 10, 8, 0x100, gpa);
 	module_t module = parse_module(&just_ast.base);
 	scope global;
@@ -626,12 +656,11 @@ void test_3ac(void)
 		dump_3ac(m2ac, bytecode.names.buf.addr);
 
 		gen_module gen = gen_x86_64(m2ac, gpa);
-		int e = elf_object_from(&gen, "basic.o", &bytecode.names, gpa);
+		int e = elf_object_from(&gen, "simpler.o", &bytecode.names, gpa);
 		if (e < 0) perror("objfile not generated");
 
 		gen_fini(&gen, gpa);
 		ir3_fini(m2ac, gpa);
-		// ir3_fini(m3ac, gpa);
 		for (map_entry *s = bytecode.names.buf.addr; s != bytecode.names.end; s++) {
 			allocation m = { (void*)s->k, s->v };
 			DEALLOC(gpa, m);
