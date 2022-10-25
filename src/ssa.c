@@ -72,7 +72,7 @@ static void serialize_initlist(byte *blob, expr *e, type_t *t, map *e2t, map_sta
 	switch (e->kind) {
 case EXPR_INITLIST:
 	assert(t->kind == TYPE_ARRAY);
-	type_info linfo = type2linfo(t->array_t.base);
+	type_info linfo = t->array_t.base->tinf;
 	for (expr **part = scratch_start(e->call.args); part != scratch_end(e->call.args); part++) {
 		serialize_initlist(blob, *part, t->array_t.base, e2t, stk);
 		blob += LINFO_GET_SIZE(linfo); // TODO: basically query the `next` insert pos from a layout structure
@@ -80,7 +80,7 @@ case EXPR_INITLIST:
 	break;
 case EXPR_INT:
 	// little endian things
-	memcpy(blob, &e->value, LINFO_GET_SIZE(type2linfo(t)));
+	memcpy(blob, &e->value, LINFO_GET_SIZE(t->tinf));
 	break;
 case EXPR_BOOL:
 	memcpy(blob, &e->value, 1);
@@ -106,7 +106,7 @@ ident_t ir3_expr(ir3_func *f, expr *e, map *e2t, map_stack *stk, value_category 
 {
 	map_entry *asso = map_find(e2t, (key_t) e, intern_hash((key_t) e), _string_cmp2); assert(asso);
 	type_t *type = (type_t*) asso->v;
-	type_info linfo = type2linfo(type);
+	type_info linfo = type->tinf;
 	switch (e->kind) {
 	ssa_ref number;
 case EXPR_INT:
@@ -288,7 +288,7 @@ case DECL_VAR:
 	assert(!map_find(&stk->ast2num, d->name, intern_hash(d->name), _string_cmp2));
 	map_entry *e = map_add(&stk->ast2num, d->name, intern_hash, a);
 	e->k = d->name;
-	ssa_ref number = new_local(&f->locals, type2linfo(d->type));
+	ssa_ref number = new_local(&f->locals, d->type->tinf);
 	e->v = number;
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_COPY, number, val }, sizeof(ssa_instr), a);
 	}
@@ -444,7 +444,7 @@ static void ir3_decl_func(ir3_func *f, decl *d, map *e2t, map_stack *stk, scope*
 		map_entry *e = map_add(&top.ast2num, arg->name, intern_hash, a);
 		e->k = arg->name;
 		e->v = arg - start;
-		type_info linfo = type2linfo(arg->type);
+		type_info linfo = arg->type->tinf;
 		dyn_arr_push(&f->locals, &linfo, sizeof linfo, a);
 		// %2 = arg.2
 		// no real constraint for both to be the same

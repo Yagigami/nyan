@@ -16,7 +16,6 @@ void type_fini(void);
 
 typedef uint32_t type_info;
 extern const type_info linfo_tbl[TYPE_NUM];
-type_info type2linfo(type_t *type);
 
 #define LINFO_TYPE 5
 static_assert((1 << LINFO_TYPE) >= TYPE_NUM, "");
