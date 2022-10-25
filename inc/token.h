@@ -1,5 +1,5 @@
-#ifndef CROUTE_TOKEN_H
-#define CROUTE_TOKEN_H
+#ifndef NYAN_TOKEN_H
+#define NYAN_TOKEN_H
 
 #include <stdint.h>
 #include <stddef.h>
@@ -101,5 +101,5 @@ size_t intern_hash(key_t k);
 source_idx token_pos(void);
 const char *token_source(source_idx pos);
 
-#endif /* CROUTE_TOKEN_H */
+#endif /* NYAN_TOKEN_H */
 

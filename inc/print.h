@@ -1,5 +1,5 @@
-#ifndef CROUTE_PRINT_H
-#define CROUTE_PRINT_H
+#ifndef NYAN_PRINT_H
+#define NYAN_PRINT_H
 
 #include <stddef.h>
 #include <stdio.h>
@@ -72,5 +72,5 @@ static_assert(MAX_ARGS <= (1<<ARGS_SHIFT), "increase ARGS_SHIFT");
 #define MSK(...) CAT(MSK, NUM_ARGS(_, ## __VA_ARGS__))(__VA_ARGS__)
 
 
-#endif /* CROUTE_PRINT_H */
+#endif /* NYAN_PRINT_H */
 

@@ -4,9 +4,9 @@ ifeq ($(DEBUG),1)
 else
 	OUT = obj/release
 endif
-HASMAIN = croute test
+HASMAIN = nyan test
 MAIN = $(addsuffix .c,$(addprefix src/,$(HASMAIN)))
-BIN = croute
+BIN = nyan
 TEST = test
 
 CC = gcc-12.2.0

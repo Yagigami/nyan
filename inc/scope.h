@@ -1,5 +1,5 @@
-#ifndef CROUTE_SYMBOL_H
-#define CROUTE_SYMBOL_H
+#ifndef NYAN_SYMBOL_H
+#define NYAN_SYMBOL_H
 
 #include "map.h"
 #include "ast.h"
@@ -21,5 +21,5 @@ void resolve_refs(module_t of, scope *to, allocator *up, allocator *final);
 void scope_fini(scope *s, allocator *a);
 decl *scope2decl(val_t v);
 
-#endif /* CROUTE_SYMBOL_H */
+#endif /* NYAN_SYMBOL_H */
 

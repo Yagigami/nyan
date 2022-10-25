@@ -1,5 +1,5 @@
-#ifndef CROUTE_FILE_H
-#define CROUTE_FILE_H
+#ifndef NYAN_FILE_H
+#define NYAN_FILE_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -14,5 +14,5 @@ enum io_status {
 int map_file_sentinel(const char *cstr, const char **view, size_t *len);
 int unmap_file_sentinel(const char *view, size_t len);
 
-#endif /* CROUTE_FILE_H */
+#endif /* NYAN_FILE_H */
 

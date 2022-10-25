@@ -1,5 +1,5 @@
-#ifndef CROUTE_TYPE_CHECK_H
-#define CROUTE_TYPE_CHECK_H
+#ifndef NYAN_TYPE_CHECK_H
+#define NYAN_TYPE_CHECK_H
 
 
 #include "ast.h"
@@ -35,5 +35,5 @@ static_assert((1 << LINFO_TYPE) >= TYPE_NUM, "");
 #define TINFO_BOOL LINFO(1, 0, TYPE_BOOL)
 #define TINFO_FUNC LINFO(0, 0, TYPE_FUNC)
 
-#endif /* CROUTE_TYPE_CHECK_H */
+#endif /* NYAN_TYPE_CHECK_H */
 

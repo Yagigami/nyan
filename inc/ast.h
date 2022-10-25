@@ -1,5 +1,5 @@
-#ifndef CROUTE_AST_H
-#define CROUTE_AST_H
+#ifndef NYAN_AST_H
+#define NYAN_AST_H
 
 
 #include "alloc.h"
@@ -169,5 +169,5 @@ expr *expr_convert(allocator *a, expr *e, type_t *to);
 
 #define AST_DUP(a,v) ast_dup((a),&(v),sizeof (v))
 
-#endif /* CROUTE_AST_H */
+#endif /* NYAN_AST_H */
 

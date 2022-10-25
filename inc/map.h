@@ -1,5 +1,5 @@
-#ifndef CROUTE_MAP_H
-#define CROUTE_MAP_H
+#ifndef NYAN_MAP_H
+#define NYAN_MAP_H
 
 #include "alloc.h"
 
@@ -31,5 +31,5 @@ map_entry *map_id(map *map, key_t k, map_hash hash, map_cmp cmp, bool *inserted,
 map_entry *map_find(map *map, key_t k, size_t h, map_cmp cmp);
 map_entry *map_add(map *map, key_t k, map_hash hash, allocator *a);
 
-#endif /* CROUTE_MAP_H */
+#endif /* NYAN_MAP_H */
 

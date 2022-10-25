@@ -591,7 +591,7 @@ void test_3ac(void)
 	allocator *gpa = (allocator*)&malloc_allocator;
 	ast_init(gpa);
 	allocator_geom perma; allocator_geom_init(&perma, 16, 8, 0x100, gpa);
-	token_init("cr/simpler.cr", ast.temps, &perma.base);
+	token_init("nyan/simpler.nyan", ast.temps, &perma.base);
 	allocator_geom just_ast; allocator_geom_init(&just_ast, 10, 8, 0x100, gpa);
 	module_t module = parse_module(&just_ast.base);
 	scope global;

@@ -1,5 +1,5 @@
-#ifndef CROUTE_GEN_X86_64_H
-#define CROUTE_GEN_X86_64_H
+#ifndef NYAN_GEN_X86_64_H
+#define NYAN_GEN_X86_64_H
 
 #include "ssa.h"
 #include "dynarr.h"
@@ -31,5 +31,5 @@ typedef struct gen_module {
 gen_module gen_x86_64(ir3_module m2ac, allocator *a);
 void gen_fini(gen_module *mod, allocator *a);
 
-#endif /* CROUTE_GEN_X86_64_H */
+#endif /* NYAN_GEN_X86_64_H */
 

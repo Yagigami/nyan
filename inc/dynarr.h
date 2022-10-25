@@ -1,5 +1,5 @@
-#ifndef CROUTE_DYNARR_H
-#define CROUTE_DYNARR_H
+#ifndef NYAN_DYNARR_H
+#define NYAN_DYNARR_H
 
 #include <stddef.h>
 #include <stdbool.h>
@@ -36,5 +36,5 @@ void *scratch_start(scratch_arr s);
 void *scratch_end  (scratch_arr s);
 size_t scratch_len(scratch_arr s);
 
-#endif /* CROUTE_DYNARR_H */
+#endif /* NYAN_DYNARR_H */
 

@@ -389,7 +389,7 @@ void test_ast(void)
 	ast_init(gpa);
 	allocator_geom perma;
 	allocator_geom_init(&perma, 16, 8, 0x100, gpa);
-	token_init("cr/basic.cr", ast.temps, &perma.base);
+	token_init("nyan/basic.nyan", ast.temps, &perma.base);
 	module_t module = parse_module(&perma.base);
 	scope global;
 	resolve_refs(module, &global, ast.temps, &perma.base);

@@ -1,5 +1,5 @@
-#ifndef CROUTE_SSA_H
-#define CROUTE_SSA_H
+#ifndef NYAN_SSA_H
+#define NYAN_SSA_H
 
 #include <stdint.h>
 #include <assert.h>
@@ -83,5 +83,5 @@ void bytecode_fini(void);
 
 int dump_3ac(ir3_module m, map_entry *globals);
 
-#endif /* CROUTE_SSA_H */
+#endif /* NYAN_SSA_H */
 
