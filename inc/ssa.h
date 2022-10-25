@@ -14,7 +14,6 @@
 typedef uint8_t ssa_ref;
 typedef uint8_t ssa_kind;
 typedef uint32_t ssa_extension;
-typedef uint32_t local_info;
 
 enum ssa_opcode
 {
@@ -47,19 +46,6 @@ enum ssa_opcode
 enum ssa_branch_cc {
 	SSAB_EQ, SSAB_NE, SSAB_LT, SSAB_LE, SSAB_GT, SSAB_GE,
 	SSAB_NUM
-};
-
-enum ssa_type
-{
-	SSAT_NONE = 0,
-	SSAT_INT8,
-	SSAT_INT32,
-	SSAT_INT64,
-	SSAT_ARRAY,
-	SSAT_ANYPTR,
-	SSAT_BOOL,
-
-	SSAT_NUM
 };
 
 // 3-address
@@ -96,15 +82,6 @@ void bytecode_init(allocator *temps);
 void bytecode_fini(void);
 
 int dump_3ac(ir3_module m, map_entry *globals);
-
-#define LINFO_TYPE 5
-#define LINFO_ALIGN 3
-#define LINFO_SIZE 24
-
-#define LINFO(size,log2a,type) ((type)|(log2a)<<LINFO_TYPE|(size)<<(LINFO_TYPE+LINFO_ALIGN))
-#define LINFO_GET_SIZE(linfo) ((linfo)>>(LINFO_TYPE+LINFO_ALIGN))
-#define LINFO_GET_ALIGN(linfo) (1<<(((linfo)>>LINFO_TYPE)&((1<<LINFO_ALIGN)-1)))
-#define LINFO_GET_TYPE(linfo) ((linfo)&((1<<LINFO_TYPE)-1))
 
 #endif /* CROUTE_SSA_H */
 

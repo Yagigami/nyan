@@ -67,13 +67,29 @@ void *ast_dup(allocator *a, void *addr, size_t size)
 	return m.addr;
 }
 
+static expr *new_expr(allocator *up)
+{
+	expr *e = ALLOC(up, sizeof *e, alignof *e).addr;
+	e->kind = EXPR_NONE;
+	return e;
+}
+
+expr *expr_convert(allocator *a, expr *e, type_t *to)
+{
+	expr *cvt = new_expr(a);
+	cvt->kind = EXPR_CONVERT;
+	cvt->convert.operand = e;
+	cvt->convert.type = to;
+	return cvt;
+}
+
 expr *parse_expr_atom(allocator *up)
 {
 	if (token_match('(')) {
 		expr *e = parse_expr(up);
 		if (token_expect(')')) return e;
 	}
-	expr *atom = ALLOC(up, sizeof *atom, 8).addr;
+	expr *atom = new_expr(up);
 	token snapshot = tokens.current;
 	atom->pos = snapshot.pos;
 	if (token_match(TOKEN_NAME)) {
@@ -97,7 +113,7 @@ expr *parse_expr_postfix(allocator *up)
 	expr *operand = parse_expr_atom(up);
 	while (true) if (token_match('(')) {
 		dyn_arr args;
-		expr *call = ALLOC(up, sizeof *call, 8).addr;
+		expr *call = new_expr(up);
 		call->pos = token_pos();
 		dyn_arr_init(&args, 0*sizeof(expr), ast.temps);
 		int num_args = 0;
@@ -111,7 +127,7 @@ expr *parse_expr_postfix(allocator *up)
 		call->call.args = scratch_from(&args, ast.temps, up);
 		operand = call;
 	} else if (token_match('[')) {
-		expr *deref = ALLOC(up, sizeof *deref, alignof *deref).addr;
+		expr *deref = new_expr(up);
 		deref->kind = EXPR_INDEX;
 		deref->pos = token_pos();
 		deref->binary.L = operand;
@@ -127,7 +143,7 @@ expr *parse_expr_prefix(allocator *up)
 {
 	token snapshot = tokens.current;
 	if (token_match_precedence('!')) {
-		expr *pre = ALLOC(up, sizeof *pre, 8).addr;
+		expr *pre = new_expr(up);
 		pre->kind = EXPR_UNARY;
 		pre->unary.op = snapshot.kind;
 		pre->unary.operand = parse_expr_prefix(up);
@@ -144,7 +160,7 @@ expr *parse_expr_add(allocator *up)
 		token_kind kind = snapshot.kind;
 		assert(kind == '+' || kind == '-');
 		expr *R = parse_expr_prefix(up);
-		expr *sum = ALLOC(up, sizeof *sum, 8).addr;
+		expr *sum = new_expr(up);
 		sum->binary.L = L;
 		sum->binary.R = R;
 		sum->binary.op = kind;
@@ -163,7 +179,7 @@ expr *parse_expr_cmp(allocator *up)
 	if (token_match_precedence(TOKEN_EQ)) {
 		token_kind kind = snapshot.kind;
 		expr *R = parse_expr_add(up); // no a == b == c
-		expr *cmp = ALLOC(up, sizeof *cmp, 8).addr;
+		expr *cmp = new_expr(up);
 		cmp->binary.L = L;
 		cmp->binary.R = R;
 		cmp->binary.op = kind;
@@ -183,7 +199,7 @@ expr *parse_expr(allocator *up)
 	// to go all the way down to parse_expr_atom when parsing an
 	// initializer list
 	if (token_match('{')) {
-		expr *init = ALLOC(up, sizeof *init, alignof *init).addr;
+		expr *init = new_expr(up);
 		init->kind = EXPR_NONE;
 		init->pos = token_pos();
 		dyn_arr init_list; dyn_arr_init(&init_list, 0, ast.temps);
@@ -216,6 +232,7 @@ void parse_type_params(dyn_arr *p, allocator *up)
 type_t *parse_type_prim(allocator *up)
 {
 	type_t *prim = ALLOC(up, sizeof *prim, 8).addr;
+	prim->tinf = -1;
 	if (token_match_kw(tokens.kw_func)) {
 		prim->kind = TYPE_FUNC;
 	} else if (token_match_kw(tokens.kw_int8)) {
@@ -238,6 +255,7 @@ type_t *parse_type_target(type_t *base, allocator *up)
 {
 	while (token_match('[')) {
 		type_t *tgt = ALLOC(up, sizeof *tgt, alignof *tgt).addr;
+		tgt->tinf = -1;
 		tgt->kind = TYPE_ARRAY;
 		tgt->array_t.base = base;
 		tgt->array_t.unchecked_count = parse_expr(up);

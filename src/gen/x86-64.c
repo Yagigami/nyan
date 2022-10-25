@@ -1,4 +1,5 @@
 #include "gen/x86-64.h"
+#include "type_check.h"
 #include "ssa.h"
 
 #include <assert.h>
@@ -183,12 +184,12 @@ static byte *setcc_mem(byte *p, idx_t offset, enum ssa_branch_cc cc)
 
 idx_t *gen_lalloc(dyn_arr *locals, idx_t *out_stack_space, allocation *to_free, allocator *a)
 {
-	idx_t num_locals = dyn_arr_size(locals) / sizeof(local_info);
+	idx_t num_locals = dyn_arr_size(locals) / sizeof(type_info);
 	allocation temp_alloc = ALLOC(a, num_locals * sizeof(idx_t), 8);
 	idx_t *local_offsets = temp_alloc.addr;
 	idx_t stack_space = 0;
 
-	local_info *l = locals->buf.addr;
+	type_info *l = locals->buf.addr;
 	for (idx_t i = 0; i < num_locals; i++) {
 		idx_t align = LINFO_GET_ALIGN(l[i]);
 		assert(align == 1 || align == 2 || align == 4 || align == 8);
@@ -252,7 +253,7 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 	idx_t *labels = ta2.addr;
 	idx_t stack_space;
 	idx_t *locals = gen_lalloc(&src->locals, &stack_space, &temp_alloc, a);
-	local_info *linfo = src->locals.buf.addr;
+	type_info *linfo = src->locals.buf.addr;
 
 	byte buf[64], *p = buf;
 	// p = endbr64(p);

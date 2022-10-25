@@ -1,3 +1,17 @@
+diffsizes func(): int32
+{
+	a: int8 = 9;
+	b: int64 = 4294967295;
+	// i: int8 = 4294967295;
+	c: int32 = 6723;
+	d: int64 = 1;
+	e: int64 = b + d;
+	h: int64 = 1 + b;
+	f: int32 = a + c;
+	// g: int8 = f;
+	return f;
+}
+
 ndarr func(): int32
 {
 	a: int32[3][2] = { { 2, 4, 6 }, { 1, 3, 5 } };

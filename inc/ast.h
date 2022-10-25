@@ -15,7 +15,6 @@ typedef idx_t decl_idx;
 
 typedef enum type_kind {
 	TYPE_NONE,
-	TYPE_ANY,
 
 	TYPE_INT8,
 	TYPE_PRIMITIVE_BEGIN = TYPE_INT8,
@@ -65,12 +64,14 @@ typedef enum expr_kind {
 	EXPR_INITLIST,
 	EXPR_ADDRESS,
 	EXPR_INDEX,
+	EXPR_CONVERT,
 } expr_kind;
 
 struct expr;
 struct decl;
 struct stmt;
 struct type_t;
+typedef uint32_t type_info;
 
 typedef struct type_t {
 	union {
@@ -80,11 +81,14 @@ typedef struct type_t {
 			struct type_t *ret_t;
 		} func_t;
 		struct {
+			// FIXME: dirty and (wah wah) unsafe
+			// should get fixed when adding struct layouts
 			union { size_t checked_count; struct expr *unchecked_count; };
 			struct type_t *base;
 		} array_t;
 	};
 	type_kind kind;
+	type_info tinf;
 } type_t;
 
 typedef struct func_arg {
@@ -108,6 +112,10 @@ typedef struct expr {
 			struct expr *operand;
 			token_kind op;
 		} unary;
+		struct {
+			struct expr *operand;
+			type_t *type;
+		} convert;
 	};
 	expr_kind kind;
 	source_idx pos;
@@ -156,6 +164,8 @@ void ast_one_more_error(void);
 
 module_t parse_module(allocator *up);
 decl *idx2decl(decl_idx i);
+
+expr *expr_convert(allocator *a, expr *e, type_t *to);
 
 #define AST_DUP(a,v) ast_dup((a),&(v),sizeof (v))
 

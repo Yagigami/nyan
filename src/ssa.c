@@ -43,51 +43,13 @@ void bytecode_fini(void)
 
 static int _string_cmp2(key_t L, key_t R) { return L - R; }
 
-local_info ssa_linfo(idx_t size, size_t align, enum ssa_type type)
-{
-	static_assert(SSAT_NUM <= (1 << LINFO_TYPE), "");
-	assert(size < (1 << LINFO_SIZE));
-	assert(align < (1 << LINFO_ALIGN));
-	uint32_t log2_align = align ==  1? 0: align ==  2? 1:
-			      align ==  4? 2: align ==  8? 3:
-			      align == 16? 4: align == 32? 5:
-			      align == 64? 6: align ==128? 7: (assert(0), 0);
-	return LINFO(size, log2_align, type);
-}
-
-static const local_info linfo_tbl[TYPE_NUM] = {
-	[TYPE_NONE] = LINFO(0, 0, SSAT_NONE),
-	[TYPE_INT8] = LINFO(1, 0, SSAT_INT8),
-	[TYPE_INT32] = LINFO(4, 2, SSAT_INT32),
-	[TYPE_INT64] = LINFO(8, 3, SSAT_INT64),
-	[TYPE_BOOL] = LINFO(1, 0, SSAT_BOOL),
-	[TYPE_FUNC] = LINFO(0, 0, SSAT_NONE),
-};
-
-static local_info type2linfo(type_t *type)
-{
-	switch (type->kind) {
-		size_t size, align;
-		enum ssa_type surface;
-		local_info base;
-	case TYPE_ARRAY:
-		base = type2linfo(type->array_t.base);
-		size = type->array_t.checked_count * LINFO_GET_SIZE(base);
-		align = LINFO_GET_ALIGN(base);
-		surface = SSAT_ARRAY;
-		return ssa_linfo(size, align, surface);
-	default:
-		return linfo_tbl[type->kind];
-	}
-}
-
 typedef struct map_stack {
 	map ast2num;
 	scope *scope;
 	struct map_stack *next;
 } map_stack;
 
-static ssa_ref new_local(dyn_arr *locals, local_info linfo)
+static ssa_ref new_local(dyn_arr *locals, type_info linfo)
 {
 	ssa_ref num = dyn_arr_size(locals)/sizeof linfo;
 	dyn_arr_push(locals, &linfo, sizeof linfo, bytecode.temps);
@@ -96,7 +58,7 @@ static ssa_ref new_local(dyn_arr *locals, local_info linfo)
 
 static ident_t ir3_expr(ir3_func *f, expr *e, map *e2t, map_stack *stk, value_category categ, allocator *a);
 
-static ident_t ir3_expr_unary(ir3_func *f, expr *e, map *e2t, map_stack *stk, local_info linfo, value_category categ, allocator *a)
+static ident_t ir3_expr_unary(ir3_func *f, expr *e, map *e2t, map_stack *stk, type_info linfo, value_category categ, allocator *a)
 {
 	ssa_ref inner = ir3_expr(f, e->unary.operand, e2t, stk, categ, a);
 	ssa_ref number = new_local(&f->locals, linfo);
@@ -110,7 +72,7 @@ static void serialize_initlist(byte *blob, expr *e, type_t *t, map *e2t, map_sta
 	switch (e->kind) {
 case EXPR_INITLIST:
 	assert(t->kind == TYPE_ARRAY);
-	local_info linfo = type2linfo(t->array_t.base);
+	type_info linfo = type2linfo(t->array_t.base);
 	for (expr **part = scratch_start(e->call.args); part != scratch_end(e->call.args); part++) {
 		serialize_initlist(blob, *part, t->array_t.base, e2t, stk);
 		blob += LINFO_GET_SIZE(linfo); // TODO: basically query the `next` insert pos from a layout structure
@@ -144,7 +106,7 @@ ident_t ir3_expr(ir3_func *f, expr *e, map *e2t, map_stack *stk, value_category 
 {
 	map_entry *asso = map_find(e2t, (key_t) e, intern_hash((key_t) e), _string_cmp2); assert(asso);
 	type_t *type = (type_t*) asso->v;
-	local_info linfo = type2linfo(type);
+	type_info linfo = type2linfo(type);
 	switch (e->kind) {
 	ssa_ref number;
 case EXPR_INT:
@@ -177,7 +139,7 @@ case EXPR_NAME:
 		return ent->v;
 	else {
 		assert(it->next);
-		number = new_local(&f->locals, linfo_tbl[TYPE_INT64]);
+		number = new_local(&f->locals, TINFO_INT64);
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ADDRESS, number, ent->v}, sizeof(ssa_instr), a);
 		return number;
 	}
@@ -267,8 +229,8 @@ case EXPR_INDEX:
 	ssa_ref index = ir3_expr(f, e->binary.R, e2t, stk, RVALUE, a);
 	ssa_ref base  = ir3_expr(f, e->binary.L, e2t, stk, RVALUE, a);
 	// FIXME: should be using `SSAT_ANYPTR`
-	ssa_ref offset = new_local(&f->locals, linfo_tbl[TYPE_INT64]);
-	ssa_ref scale = new_local(&f->locals, linfo_tbl[TYPE_INT64]);
+	ssa_ref offset = new_local(&f->locals, TINFO_INT64);
+	ssa_ref scale = new_local(&f->locals, TINFO_INT64);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_IMM, scale }, sizeof(ssa_instr), a);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .v=LINFO_GET_SIZE(linfo) }, sizeof(ssa_extension), a);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_MUL, offset, index, scale }, sizeof(ssa_instr), a);
@@ -295,12 +257,20 @@ case EXPR_INITLIST:
 	map_entry name = global_name((ident_t) buf, len, a);
 	dyn_arr_push(&bytecode.names, &name, sizeof name, a);
 	// FIXME: use ANYPTR somehow
-	ssa_ref local = new_local(&f->locals, linfo_tbl[TYPE_INT64]);
+	ssa_ref local = new_local(&f->locals, TINFO_INT64);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_GLOBAL_REF, local }, sizeof(ssa_instr), a);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .v=ref }, sizeof(ssa_extension), a);
 	ssa_ref target = new_local(&f->locals, linfo);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_MEMCOPY, target, local }, sizeof(ssa_instr), a);
 	return target;
+	}
+
+case EXPR_CONVERT:
+	{
+	ssa_ref from = ir3_expr(f, e->convert.operand, e2t, stk, categ, a);
+	ssa_ref number = new_local(&f->locals, e->convert.type->tinf);
+	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_COPY, .to=number, .L=from }, sizeof(ssa_instr), a);
+	return number;
 	}
 
 default:
@@ -352,7 +322,7 @@ case STMT_RETURN:
 case STMT_IFELSE:
 	{
 	ssa_ref cond = ir3_expr(f, s->ifelse.cond, e2t, stk, RVALUE, a);
-	ssa_ref check = new_local(&f->locals, linfo_tbl[TYPE_BOOL]);
+	ssa_ref check = new_local(&f->locals, TINFO_BOOL);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_BOOL, check, 0 }, sizeof(ssa_instr), a);
 	buf[0] = (ssa_instr){ .kind=SSA_BR, SSAB_NE, cond, check };
 	buf[1] = (ssa_instr){ .v = -1 };
@@ -432,7 +402,7 @@ case STMT_WHILE:
 	ir3_node *cond_blk = dyn_arr_push(&f->nodes, NULL, sizeof *cond_blk, a);
 	cond_blk[-1].end = cond_blk->begin = dyn_arr_size(&f->ins);
 	ssa_ref cond = ir3_expr(f, s->ifelse.cond, e2t, stk, RVALUE, a);
-	ssa_ref check = new_local(&f->locals, linfo_tbl[TYPE_BOOL]);
+	ssa_ref check = new_local(&f->locals, TINFO_BOOL);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_BOOL, check, 0 }, sizeof(ssa_instr), a);
 	ssa_ref lbl_post = dyn_arr_size(&f->nodes) / sizeof(ir3_node);
 	ir3_node *post = dyn_arr_push(&f->nodes, NULL, sizeof *post, a);
@@ -474,7 +444,7 @@ static void ir3_decl_func(ir3_func *f, decl *d, map *e2t, map_stack *stk, scope*
 		map_entry *e = map_add(&top.ast2num, arg->name, intern_hash, a);
 		e->k = arg->name;
 		e->v = arg - start;
-		local_info linfo = type2linfo(arg->type);
+		type_info linfo = type2linfo(arg->type);
 		dyn_arr_push(&f->locals, &linfo, sizeof linfo, a);
 		// %2 = arg.2
 		// no real constraint for both to be the same
@@ -488,9 +458,8 @@ static void ir3_decl_func(ir3_func *f, decl *d, map *e2t, map_stack *stk, scope*
 	last->end = dyn_arr_size(&f->ins);
 }
 
-static void patch_relocs(ir3_module mod, module_t ast, map *ast2num)
+static void patch_relocs(ir3_module mod, map *ast2num)
 {
-	decl_idx *base_decls = scratch_start(ast);
 	ir3_sym *base_syms = scratch_start(mod);
 	for (ir3_reloc *reloc = bytecode.relocs.buf.addr; reloc != bytecode.relocs.end; reloc++) {
 		ir3_sym *sym = &base_syms[reloc->sym_in];
@@ -525,16 +494,10 @@ ir3_module convert_to_3ac(module_t ast, scope *enclosing, map *e2t, allocator *a
 		dyn_arr_push(&bytecode.blob, &sym, sizeof sym, bytecode.temps);
 	}
 	ir3_module out = scratch_from(&bytecode.blob, bytecode.temps, a);
-	patch_relocs(out, ast, &bottom.ast2num);
+	patch_relocs(out, &bottom.ast2num);
 	map_fini(&bottom.ast2num, a);
 	return out;
 }
-
-static const enum ssa_branch_cc invert_cc[SSAB_NUM] = {
-	[SSAB_EQ] = SSAB_NE, [SSAB_NE] = SSAB_EQ,
-	[SSAB_LT] = SSAB_GE, [SSAB_LE] = SSAB_GT,
-	[SSAB_GT] = SSAB_LE, [SSAB_GE] = SSAB_LT,
-};
 
 static void ir2_decl_func(ir3_func *dst, ir3_func *src, allocator *a)
 {
