@@ -57,10 +57,23 @@ static byte opcode_anysize(byte opcode, int bytes)
 	return opcode;
 }
 
+static byte *rex_ifreq(byte *p, int bytes, int r, int x, int b)
+{
+	if (bytes == 8
+	|| (r >> 3) || (x >> 3) || (b >> 3)
+	|| (bytes == 1 && (r >= 4 || x >= 4 || b >= 4)))
+		*p++ = rex(bytes==8, r>>3, x>>3, b>>3);
+	return p;
+}
+
+static byte *prefix_ifreq(byte *p, int bytes, int r, int x, int b)
+{
+	return rex_ifreq(override_if16b(p, bytes), bytes, r, x, b);
+}
+
 static byte *load(byte *p, enum x86_64_reg to, enum x86_64_reg base, idx_t offset, int bytes)
 {
-	override_if16b(p, bytes);
-	if (bytes == 1 || bytes == 8 || to >= R8) *p++ = rex(bytes==8, to>>3, 0, 0);
+	p = prefix_ifreq(p, bytes, to, 0, 0);
 	*p++ = opcode_anysize(0x8b, bytes);
 	return emit_disp(p, to, base, offset);
 }
@@ -72,9 +85,7 @@ static byte *load_rbprel(byte *p, enum x86_64_reg to, idx_t offset, int bytes)
 
 static byte *store(byte *p, enum x86_64_reg from, enum x86_64_reg base, idx_t offset, int bytes)
 {
-	override_if16b(p, bytes);
-	// if bytes == 1, you only need a REX if you are accessing registers other than ACDB, technically
-	if (bytes == 1 || bytes == 8 || from >= R8) *p++ = rex(bytes==8, from>>3, 0, 0);
+	p = prefix_ifreq(p, bytes, from, 0, 0);
 	*p++ = opcode_anysize(0x89, bytes);
 	return emit_disp(p, from, base, offset);
 }
@@ -87,7 +98,7 @@ static byte *store_rbprel(byte *p, enum x86_64_reg from, idx_t offset, int bytes
 static byte *addsub(byte *p, enum x86_64_reg L, enum x86_64_reg R, enum ssa_opcode opc, int bytes)
 {
 	byte opcode = opc == SSA_ADD? 0x01: opc == SSA_SUB? 0x29: -1;
-	if (bytes == 1 || bytes == 8 || L >= R8 || R >= R8) *p++ = rex(bytes==8, R>>3, 0, L>>3);
+	p = prefix_ifreq(p, bytes, R, 0, L);
 	*p++ = opcode_anysize(opcode, bytes);
 	*p++ = modrm(3, L, R);
 	return p;
@@ -95,7 +106,7 @@ static byte *addsub(byte *p, enum x86_64_reg L, enum x86_64_reg R, enum ssa_opco
 
 static byte *umul(byte *p, enum x86_64_reg fac, int bytes)
 {
-	if (bytes == 1 || bytes == 8 || fac >= R8) *p++ = rex(bytes==8, 0, 0, fac>>3);
+	p = prefix_ifreq(p, bytes, 0, 0, fac);
 	*p++ = opcode_anysize(0xf7, bytes);
 	*p++ = modrm(3, fac, 4); // for 1-address imul, opcode extension is 5
 	return p;
@@ -104,7 +115,7 @@ static byte *umul(byte *p, enum x86_64_reg fac, int bytes)
 static byte *addsubimm(byte *p, enum x86_64_reg r, idx_t imm, enum ssa_opcode opc, int bytes)
 {
 	byte opcode_ext = opc == SSA_ADD? 0: opc == SSA_SUB? 5: -1;
-	if (bytes == 1 || bytes == 8 || r >= R8) *p++ = rex(bytes==8, 0, 0, r>>3);
+	p = prefix_ifreq(p, bytes, 0, 0, r);
 	if (-0x80 <= imm && imm < 0x80) {
 		*p++ = opcode_anysize(0x83, bytes);
 		*p++ = modrm(3, r, opcode_ext);
@@ -132,8 +143,7 @@ static byte *pop64(byte *p, enum x86_64_reg r)
 
 static byte *mov(byte *p, enum x86_64_reg L, enum x86_64_reg R, int bytes)
 {
-	override_if16b(p, bytes);
-	if (bytes == 1 || bytes == 8 || L >= R8 || R >= R8) *p++ = rex(bytes==8, L>>3, 0, R>>3);
+	p = prefix_ifreq(p, bytes, L, 0, R);
 	*p++ = opcode_anysize(0x8b, bytes);
 	*p++ = modrm(3, R, L);
 	return p;
@@ -152,13 +162,7 @@ static byte *mov_imm32(byte *p, enum x86_64_reg r, idx_t imm)
 static byte *store_rbprel_imm8(byte *p, idx_t offset, idx_t imm)
 {
 	*p++ = 0xc6;
-	if (-0x80 <= offset && offset < 0x80) {
-		*p++ = modrm(1, RBP, 0);
-		return imm8(imm8(p, offset), imm);
-	} else {
-		*p++ = modrm(2, RBP, 0);
-		return imm8(imm32(p, offset), imm);
-	}
+	return imm8(emit_disp(p, 0, RBP, offset), imm);
 }
 
 // 2AC EQ/NE/LT/LE/GT/GE
