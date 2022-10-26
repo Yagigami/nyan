@@ -60,6 +60,7 @@ static byte opcode_anysize(byte opcode, int bytes)
 
 static byte *rex_ifreq(byte *p, int bytes, int r, int x, int b)
 {
+	assert(bytes == 1 || bytes == 2 || bytes == 4 || bytes == 8);
 	if (bytes == 8
 	|| (r >> 3) || (x >> 3) || (b >> 3)
 	|| (bytes == 1 && (r >= 4 || x >= 4 || b >= 4)))
@@ -239,6 +240,37 @@ static byte *lea_rip(byte *p, enum x86_64_reg res, idx_t disp32, int bytes)
 	return imm32(p, disp32);
 }
 
+// for now, the conversion is done on whatever is in the A register
+static byte *convert(byte *p, type_info to, type_info from)
+{
+	enum x86_64_reg dst = RAX, src = RAX;
+	type_kind to_t = LINFO_GET_TYPE(to), from_t = LINFO_GET_TYPE(from);
+#define COMBINE(TO, FROM) ((TO)+(FROM)*LINFO_TYPE)
+	switch (COMBINE(to_t, from_t)) {
+	case COMBINE(TYPE_INT32, TYPE_INT8 ):
+		*p++ = 0x0f;
+		*p++ = 0xbe;
+		*p++ = modrm(3, src, dst);
+		break;
+	case COMBINE(TYPE_INT64, TYPE_INT8 ):
+		// there is a REX.W, contrary to what the manual says
+		*p++ = rex(1, dst>>3, 0, src>>3);
+		*p++ = 0x0f;
+		*p++ = 0xbe;
+		*p++ = modrm(3, src, dst);
+		break;
+	case COMBINE(TYPE_INT64, TYPE_INT32):
+		*p++ = rex(1, dst>>3, 0, src>>3);
+		*p++ = 0x63;
+		*p++ = modrm(3, src, dst);
+		break;
+	default:
+		assert(0);
+	}
+#undef COMBINE
+	return p;
+}
+
 // FIXME: handle more than 6 args
 static const enum x86_64_reg sysv_arg[6] = { RDI, RSI, RDX, RCX, R8, R9 };
 
@@ -298,8 +330,21 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 
 			case SSA_COPY:
 				width = LINFO_GET_SIZE(linfo[i->L]);
+				if (width > 8) {
+					// FIXME: yuck
+					assert(LINFO_GET_SIZE(linfo[i->to]) == width);
+					p = load_rbprel(p, RDI, locals[i->to], 8); // assuming pointers are 8-bytes
+					p = load_rbprel(p, RSI, locals[i->L ], 8);
+					p = mov_imm32(p, RCX, width);
+					*p++ = 0xf2;
+					*p++ = 0xa4;
+					break;
+				}
 				p = load_rbprel(p, RAX, locals[i->L], width);
-				p = store_rbprel(p, RAX, locals[i->to], width);
+				if (linfo[i->to] != linfo[i->L]) { // type conversion
+					p = convert(p, linfo[i->to], linfo[i->L]);
+				}
+				p = store_rbprel(p, RAX, locals[i->to], LINFO_GET_SIZE(linfo[i->to]));
 				break;
 
 			case SSA_LABEL:

@@ -18,7 +18,7 @@ INCPATH = inc
 STDC = c11
 CFLAGS = -I $(INCPATH) -Wall -Wextra -Wno-switch -std=$(STDC) -fPIC
 ifeq ($(DEBUG),1)
-	CFLAGS += -g -O0 -fsanitize=undefined
+	CFLAGS += -ggdb3 -O0 -fsanitize=undefined
 	LDFLAGS += -fsanitize=undefined
 else
 	CFLAGS += -O3 -flto -DNDEBUG
