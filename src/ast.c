@@ -144,7 +144,7 @@ expr *parse_expr_prefix(allocator *up)
 	token snapshot = tokens.current;
 	if (token_match_precedence('!')) {
 		expr *pre = new_expr(up);
-		pre->kind = EXPR_UNARY;
+		pre->kind = EXPR_LOG_NOT;
 		pre->unary.op = snapshot.kind;
 		pre->unary.operand = parse_expr_prefix(up);
 		pre->pos = snapshot.pos;
@@ -257,8 +257,8 @@ type_t *parse_type_target(type_t *base, allocator *up)
 		type_t *tgt = ALLOC(up, sizeof *tgt, alignof *tgt).addr;
 		tgt->tinf = -1;
 		tgt->kind = TYPE_ARRAY;
-		tgt->array_t.base = base;
-		tgt->array_t.unchecked_count = parse_expr(up);
+		tgt->base = base;
+		expr *len = tgt->unchecked_count = parse_expr(up);
 		if (!token_expect(']')) goto err;
 		base = tgt;
 	}
@@ -278,8 +278,8 @@ type_t *parse_type(allocator *up)
 			dyn_arr_fini(&params, ast.temps);
 			goto err;
 		}
-		t->func_t.params = scratch_from(&params, ast.temps, up);
-		t->func_t.ret_t = parse_type(up);
+		t->params = scratch_from(&params, ast.temps, up);
+		t->base = parse_type(up);
 	}
 	return t;
 err:

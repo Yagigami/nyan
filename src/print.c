@@ -66,6 +66,7 @@ static int fprint_ir3_instr(FILE *to, const ssa_instr *i, int *extra_offset, con
 		[TYPE_ARRAY] = "array",
 		[TYPE_BOOL] = "bool",
 		[TYPE_FUNC] = "func",
+		[TYPE_PTR] = "ptr",
 	};
 #define T type2s[LINFO_GET_TYPE(*linfo)]
 	static const char *opc2s[SSAB_GE-SSAB_EQ+1] = { "eq", "ne", "lt", "le", "gt", "ge" };

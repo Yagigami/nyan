@@ -56,25 +56,14 @@ static ssa_ref new_local(dyn_arr *locals, type_info linfo)
 	return num;
 }
 
-static ident_t ir3_expr(ir3_func *f, expr *e, map *e2t, map_stack *stk, value_category categ, allocator *a);
-
-static ident_t ir3_expr_unary(ir3_func *f, expr *e, map *e2t, map_stack *stk, type_info linfo, value_category categ, allocator *a)
-{
-	ssa_ref inner = ir3_expr(f, e->unary.operand, e2t, stk, categ, a);
-	ssa_ref number = new_local(&f->locals, linfo);
-	token_kind op = e->unary.op;
-	dyn_arr_push(&f->ins, &(ssa_instr){ .kind = op == '!'? SSA_BOOL_NEG: -1, number, inner }, sizeof(ssa_instr), a);
-	return number;
-}
-
 static void serialize_initlist(byte *blob, expr *e, type_t *t, map *e2t, map_stack *stk)
 {
 	switch (e->kind) {
 case EXPR_INITLIST:
 	assert(t->kind == TYPE_ARRAY);
-	type_info linfo = t->array_t.base->tinf;
+	type_info linfo = t->base->tinf;
 	for (expr **part = scratch_start(e->call.args); part != scratch_end(e->call.args); part++) {
-		serialize_initlist(blob, *part, t->array_t.base, e2t, stk);
+		serialize_initlist(blob, *part, t->base, e2t, stk);
 		blob += LINFO_GET_SIZE(linfo); // TODO: basically query the `next` insert pos from a layout structure
 	}
 	break;
@@ -102,7 +91,10 @@ static map_entry global_name(ident_t name, size_t len, allocator *a)
 	return r;
 }
 
-ident_t ir3_expr(ir3_func *f, expr *e, map *e2t, map_stack *stk, value_category categ, allocator *a)
+// rvalue is used in assignment contexts
+// a[1] = b; ---> rvalue = b
+// 12 ---> rvalue = REF_NONE
+static ident_t ir3_expr(ir3_func *f, expr *e, map *e2t, map_stack *stk, ssa_ref rvalue, allocator *a)
 {
 	map_entry *asso = map_find(e2t, (key_t) e, intern_hash((key_t) e), _string_cmp2); assert(asso);
 	type_t *type = (type_t*) asso->v;
@@ -132,29 +124,26 @@ case EXPR_NAME:
 			it = it->next;
 			ent = map_find(&it->ast2num, name, h, _string_cmp2);
 		} else {
+			// TODO: find a better way to handle this maybe lol
 			return ~name;
 		}
 	}
-	if (categ == RVALUE)
-		return ent->v;
-	else {
-		assert(it->next);
-		number = new_local(&f->locals, TINFO_INT64);
-		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ADDRESS, number, ent->v}, sizeof(ssa_instr), a);
-		return number;
-	}
+	if (rvalue != REF_NONE)
+		assert(it->next),
+		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_COPY, ent->v, rvalue }, sizeof(ssa_instr), a);
+	return ent->v;
 	}
 
 case EXPR_CALL:
 	{
-	ident_t func = ir3_expr(f, e->call.operand, e2t, stk, RVALUE, a);
+	ident_t func = ir3_expr(f, e->call.operand, e2t, stk, REF_NONE, a);
 	idx_t num_args = scratch_len(e->call.args) / sizeof(expr*);
 	assert(num_args < (1L << (8*sizeof(ssa_ref))) - 1);
 	idx_t ratio = sizeof(ssa_extension) / sizeof(ssa_ref);
 	idx_t num_ext = (num_args + ratio - 1) / ratio + 1;
 	allocation m = ALLOC(a, (1 + num_ext) * sizeof(ssa_instr), alignof(ssa_instr));
 	ssa_instr *instr = m.addr, *call=instr;
-	*instr++ = (ssa_instr){ .kind=SSA_CALL, -1, .R=num_args };
+	*instr++ = (ssa_instr){ .kind=SSA_CALL, REF_NONE, .R=num_args };
 	(*instr++).v = func;
 	// little endian things
 	ssa_ref buf[ratio];
@@ -162,13 +151,13 @@ case EXPR_CALL:
 	idx_t arg, idx;
 	for (arg = 0, idx = 0; arg < num_args - ratio; arg++, idx %= ratio) {
 		// FIXME: not giving the right id, either here or in decode
-		buf[idx++] = ir3_expr(f, base[arg], e2t, stk, RVALUE, a);
+		buf[idx++] = ir3_expr(f, base[arg], e2t, stk, REF_NONE, a);
 		if ((arg + ratio - 1) % ratio == 0)
 			memcpy(instr++, buf, sizeof buf);
 	}
 	// last iteration is special: must publish even if you have less arguments
 	for (; arg < num_args; arg++)
-		buf[idx++] = ir3_expr(f, base[arg], e2t, stk, RVALUE, a);
+		buf[idx++] = ir3_expr(f, base[arg], e2t, stk, REF_NONE, a);
 	if (num_args)
 		memcpy(instr++, buf, sizeof buf);
 	// post after the arguments are evaluated
@@ -184,8 +173,8 @@ case EXPR_CALL:
 
 case EXPR_ADD:
 	{
-	ssa_ref L = ir3_expr(f, e->binary.L, e2t, stk, RVALUE, a);
-	ssa_ref R = ir3_expr(f, e->binary.R, e2t, stk, RVALUE, a);
+	ssa_ref L = ir3_expr(f, e->binary.L, e2t, stk, REF_NONE, a);
+	ssa_ref R = ir3_expr(f, e->binary.R, e2t, stk, REF_NONE, a);
 	number = new_local(&f->locals, linfo);
 	token_kind op = e->binary.op;
 	enum ssa_opcode opc = 	op == '+' ? SSA_ADD:
@@ -197,8 +186,8 @@ case EXPR_ADD:
 
 case EXPR_CMP:
 	{
-	ssa_ref L = ir3_expr(f, e->binary.L, e2t, stk, RVALUE, a);
-	ssa_ref R = ir3_expr(f, e->binary.R, e2t, stk, RVALUE, a);
+	ssa_ref L = ir3_expr(f, e->binary.L, e2t, stk, REF_NONE, a);
+	ssa_ref R = ir3_expr(f, e->binary.R, e2t, stk, REF_NONE, a);
 	number = new_local(&f->locals, linfo);
 	token_kind op = e->binary.op;
 	enum ssa_branch_cc cc =	op == TOKEN_EQ ? SSAB_EQ: op == TOKEN_NEQ? SSAB_NE:
@@ -213,35 +202,52 @@ case EXPR_CMP:
 	return number;
 	}
 
-case EXPR_UNARY:
+case EXPR_LOG_NOT:
 	{
-	return ir3_expr_unary(f, e, e2t, stk, linfo, categ, a);
+	ssa_ref inner = ir3_expr(f, e->unary.operand, e2t, stk, REF_NONE, a);
+	number = new_local(&f->locals, linfo);
+	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_BOOL_NEG, number, inner }, sizeof(ssa_instr), a);
+	return number;
 	}
 
 case EXPR_ADDRESS:
 	{
-	// FIXME: sus
-	return ir3_expr(f, e->unary.operand, e2t, stk, LVALUE, a);
+	expr *sub = e->unary.operand;
+	assert(rvalue == REF_NONE);
+	if (sub->kind == EXPR_NAME) {
+		ssa_ref name = ir3_expr(f, sub, e2t, stk, REF_NONE, a);
+		number = new_local(&f->locals, linfo);
+		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ADDRESS, number, name }, sizeof(ssa_instr), a);
+		return number;
+	} else if (sub->kind == EXPR_INDEX) {
+		ssa_ref index = ir3_expr(f, sub->binary.R, e2t, stk, REF_NONE, a);
+		ssa_ref base = ir3_expr(f, sub->binary.L, e2t, stk, REF_NONE, a);
+		type_info *base_tinfo = f->locals.buf.addr + base * sizeof *base_tinfo;
+		number = new_local(&f->locals, linfo);
+		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_IMM, number }, sizeof(ssa_instr), a);
+		dyn_arr_push(&f->ins, &(ssa_instr){ .v=LINFO_GET_SIZE(*base_tinfo) }, sizeof(ssa_instr), a);
+		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_MUL, number, number, index }, sizeof(ssa_instr), a);
+		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ADD, number, number, base }, sizeof(ssa_instr), a);
+		return number;
+	} else __builtin_unreachable();
 	}
 
 case EXPR_INDEX:
 	{
-	ssa_ref index = ir3_expr(f, e->binary.R, e2t, stk, RVALUE, a);
-	ssa_ref base  = ir3_expr(f, e->binary.L, e2t, stk, RVALUE, a);
-	// FIXME: should be using `SSAT_ANYPTR`
-	ssa_ref offset = new_local(&f->locals, TINFO_INT64);
-	ssa_ref scale = new_local(&f->locals, TINFO_INT64);
-	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_IMM, scale }, sizeof(ssa_instr), a);
-	dyn_arr_push(&f->ins, &(ssa_instr){ .v=LINFO_GET_SIZE(linfo) }, sizeof(ssa_extension), a);
-	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_MUL, offset, index, scale }, sizeof(ssa_instr), a);
-	// not making SSA
-	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ADD, offset, offset, base }, sizeof(ssa_instr), a);
-	if (categ == RVALUE) {
-		ssa_ref value = new_local(&f->locals, linfo);
-		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_LOAD, value, offset }, sizeof(ssa_instr), a);
-		return value;
+	ssa_ref index = ir3_expr(f, e->binary.R, e2t, stk, REF_NONE, a);
+	ssa_ref base = ir3_expr(f, e->binary.L, e2t, stk, REF_NONE, a);
+	ssa_ref addr = new_local(&f->locals, TINFO_PTR);
+	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_IMM, addr }, sizeof(ssa_instr), a);
+	dyn_arr_push(&f->ins, &(ssa_instr){ .v=LINFO_GET_SIZE(linfo) }, sizeof(ssa_instr), a);
+	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_MUL, addr, addr, index }, sizeof(ssa_instr), a);
+	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ADD, addr, addr, base }, sizeof(ssa_instr), a);
+	if (rvalue == REF_NONE) {
+		number = new_local(&f->locals, linfo);
+		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_LOAD, number, addr }, sizeof(ssa_instr), a);
+		return number;
 	} else {
-		return offset;
+		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_STORE, rvalue, addr }, sizeof(ssa_instr), a);
+		return rvalue;
 	}
 	}
 
@@ -267,7 +273,8 @@ case EXPR_INITLIST:
 
 case EXPR_CONVERT:
 	{
-	ssa_ref from = ir3_expr(f, e->convert.operand, e2t, stk, categ, a);
+	assert(rvalue == REF_NONE);
+	ssa_ref from = ir3_expr(f, e->convert.operand, e2t, stk, rvalue, a);
 	ssa_ref number = new_local(&f->locals, e->convert.type->tinf);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_COPY, .to=number, .L=from }, sizeof(ssa_instr), a);
 	return number;
@@ -284,13 +291,19 @@ static void ir3_decl(ir3_func *f, decl_idx i, map *e2t, map_stack *stk, allocato
 	switch (d->kind) {
 case DECL_VAR:
 	{
-	ssa_ref val = ir3_expr(f, d->var_d.init, e2t, stk, RVALUE, a);
+	ssa_ref val = ir3_expr(f, d->var_d.init, e2t, stk, REF_NONE, a);
 	assert(!map_find(&stk->ast2num, d->name, intern_hash(d->name), _string_cmp2));
 	map_entry *e = map_add(&stk->ast2num, d->name, intern_hash, a);
 	e->k = d->name;
-	ssa_ref number = new_local(&f->locals, d->type->tinf);
-	e->v = number;
-	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_COPY, number, val }, sizeof(ssa_instr), a);
+	map_entry *init_entry = map_find(e2t, (key_t) d->var_d.init, intern_hash((key_t) d->var_d.init), _string_cmp2); assert(init_entry);
+	type_t *init_type = (type_t*) init_entry->v;
+	if (d->var_d.init->kind == EXPR_NAME || d->type->tinf != init_type->tinf) {
+		ssa_ref number = new_local(&f->locals, d->type->tinf);
+		e->v = number;
+		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_COPY, number, val }, sizeof(ssa_instr), a);
+	} else {
+		e->v = val;
+	}
 	}
 	break;
 default:
@@ -307,21 +320,19 @@ case STMT_DECL:
 	break;
 case STMT_ASSIGN:
 	{
-	ssa_ref R = ir3_expr(f, s->assign.R, e2t, stk, RVALUE, a);
-	ssa_ref L = ir3_expr(f, s->assign.L, e2t, stk, LVALUE, a);
-	ssa_instr *prev = f->ins.end - sizeof *prev;
-	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_STORE, R, L }, sizeof(ssa_instr), a);
+	ssa_ref R = ir3_expr(f, s->assign.R, e2t, stk, REF_NONE, a);
+	ir3_expr(f, s->assign.L, e2t, stk, R, a);
 	break;
 	}
 case STMT_RETURN:
 	{
-	ssa_ref ret = ir3_expr(f, s->e, e2t, stk, RVALUE, a);
+	ssa_ref ret = ir3_expr(f, s->e, e2t, stk, REF_NONE, a);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_RET, ret }, sizeof(ssa_instr), a);
 	break;
 	}
 case STMT_IFELSE:
 	{
-	ssa_ref cond = ir3_expr(f, s->ifelse.cond, e2t, stk, RVALUE, a);
+	ssa_ref cond = ir3_expr(f, s->ifelse.cond, e2t, stk, REF_NONE, a);
 	ssa_ref check = new_local(&f->locals, TINFO_BOOL);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_BOOL, check, 0 }, sizeof(ssa_instr), a);
 	buf[0] = (ssa_instr){ .kind=SSA_BR, SSAB_NE, cond, check };
@@ -401,7 +412,7 @@ case STMT_WHILE:
 
 	ir3_node *cond_blk = dyn_arr_push(&f->nodes, NULL, sizeof *cond_blk, a);
 	cond_blk[-1].end = cond_blk->begin = dyn_arr_size(&f->ins);
-	ssa_ref cond = ir3_expr(f, s->ifelse.cond, e2t, stk, RVALUE, a);
+	ssa_ref cond = ir3_expr(f, s->ifelse.cond, e2t, stk, REF_NONE, a);
 	ssa_ref check = new_local(&f->locals, TINFO_BOOL);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_BOOL, check, 0 }, sizeof(ssa_instr), a);
 	ssa_ref lbl_post = dyn_arr_size(&f->nodes) / sizeof(ir3_node);
@@ -440,7 +451,7 @@ static void ir3_decl_func(ir3_func *f, decl *d, map *e2t, map_stack *stk, scope*
 	scope *sub = scratch_start(fsc[0]->sub);
 	map_stack top = { .scope=(*fsc)++, .next=stk };
 	map_init(&top.ast2num, 0, a);
-	for (func_arg *start = scratch_start(d->type->func_t.params), *arg = start; arg != scratch_end(d->type->func_t.params); arg++) {
+	for (func_arg *start = scratch_start(d->type->params), *arg = start; arg != scratch_end(d->type->params); arg++) {
 		map_entry *e = map_add(&top.ast2num, arg->name, intern_hash, a);
 		e->k = arg->name;
 		e->v = arg - start;
@@ -591,7 +602,7 @@ void test_3ac(void)
 	allocator *gpa = (allocator*)&malloc_allocator;
 	ast_init(gpa);
 	allocator_geom perma; allocator_geom_init(&perma, 16, 8, 0x100, gpa);
-	token_init("nyan/simpler.nyan", ast.temps, &perma.base);
+	token_init("nyan/basic.nyan", ast.temps, &perma.base);
 	allocator_geom just_ast; allocator_geom_init(&just_ast, 10, 8, 0x100, gpa);
 	module_t module = parse_module(&just_ast.base);
 	scope global;
@@ -619,7 +630,7 @@ void test_3ac(void)
 		dump_3ac(m2ac, bytecode.names.buf.addr);
 
 		gen_module gen = gen_x86_64(m2ac, gpa);
-		int e = elf_object_from(&gen, "simpler.o", &bytecode.names, gpa);
+		int e = elf_object_from(&gen, "basic.o", &bytecode.names, gpa);
 		if (e < 0) perror("objfile not generated");
 
 		gen_fini(&gen, gpa);

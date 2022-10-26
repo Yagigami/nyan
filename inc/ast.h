@@ -60,7 +60,7 @@ typedef enum expr_kind {
 	EXPR_CALL,
 	EXPR_ADD,
 	EXPR_CMP,
-	EXPR_UNARY,
+	EXPR_LOG_NOT,
 	EXPR_INITLIST,
 	EXPR_ADDRESS,
 	EXPR_INDEX,
@@ -74,18 +74,13 @@ struct type_t;
 typedef uint32_t type_info;
 
 typedef struct type_t {
+	struct type_t *base;
 	union {
-		struct {
-			// func_arg array
-			scratch_arr params;
-			struct type_t *ret_t;
-		} func_t;
-		struct {
-			// FIXME: dirty and (wah wah) unsafe
-			// should get fixed when adding struct layouts
-			union { size_t checked_count; struct expr *unchecked_count; };
-			struct type_t *base;
-		} array_t;
+		// func_arg array
+		scratch_arr params;
+		// FIXME: dirty and (wah wah) unsafe
+		// should get fixed when adding struct layouts
+		union { size_t checked_count; struct expr *unchecked_count; };
 	};
 	type_kind kind;
 	type_info tinf;

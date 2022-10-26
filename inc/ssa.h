@@ -15,6 +15,8 @@ typedef uint8_t ssa_ref;
 typedef uint8_t ssa_kind;
 typedef uint32_t ssa_extension;
 
+#define REF_NONE ((ssa_ref)-1)
+
 enum ssa_opcode
 {
 	SSA_NONE = 0,

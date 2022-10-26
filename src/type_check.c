@@ -37,12 +37,12 @@ static bool same_type(const type_t *L, const type_t *R)
 	case TYPE_BOOL:
 		return true;
 	case TYPE_FUNC:
-		if (!same_type(L->func_t.ret_t, R->func_t.ret_t)) return false;
+		if (!same_type(L->base, R->base)) return false;
 		{
 			assert(0 && "not implemented");
 		}
 	case TYPE_ARRAY:
-		return same_type(L->array_t.base, R->array_t.base) && L->array_t.checked_count == R->array_t.checked_count;
+		return same_type(L->base, R->base) && L->checked_count == R->checked_count;
 	default:
 		return false;
 	}
@@ -76,7 +76,8 @@ static expr *decay_expr(type_t *t, expr *e, type_t **new, map *e2t, allocator *u
 		e = addr;
 		type_t *d = ALLOC(up, sizeof *d, alignof *d).addr;
 		d->kind = TYPE_PTR;
-		d->array_t.base = t->array_t.base;
+		d->base = t->base;
+		d->tinf = TINFO_PTR;
 		*new = d;
 		map_entry *asso = map_add(e2t, (key_t) e, intern_hash, types.temps);
 		asso->k = (key_t) e;
@@ -101,11 +102,11 @@ static void complete_type(type_t *t, scope_stack_l *stk, map *e2t, allocator *up
 	CASE(FUNC);
 #undef CASE
 	case TYPE_ARRAY:
-		type_check_expr(t->array_t.unchecked_count, stk, &type_int64, RVALUE, e2t, up, true);
-		complete_type(t->array_t.base, stk, e2t, up);
-		t->array_t.checked_count = t->array_t.unchecked_count->value;
-		base = t->array_t.base->tinf;
-		t->tinf = LINFO(t->array_t.checked_count * LINFO_GET_SIZE(base), LINFO_GET_L2ALIGN(base), TYPE_ARRAY);
+		type_check_expr(t->unchecked_count, stk, &type_int64, RVALUE, e2t, up, true);
+		complete_type(t->base, stk, e2t, up);
+		t->checked_count = t->unchecked_count->value;
+		base = t->base->tinf;
+		t->tinf = LINFO(t->checked_count * LINFO_GET_SIZE(base), LINFO_GET_L2ALIGN(base), TYPE_ARRAY);
 		break;
 	default:
 		__builtin_unreachable();
@@ -206,7 +207,7 @@ case EXPR_INDEX:
 		asso->k = (key_t) e->binary.R;
 		asso->v = (val_t) &type_int64;
 	}
-	type = base->array_t.base;
+	type = base->base;
 	break;
 	}
 
@@ -217,15 +218,15 @@ case EXPR_INITLIST:
 	if (!expect_or(expecting->kind == TYPE_ARRAY,
 			e->pos, "can only initialize an array with an initializer list.\n")) break;
 	for (expr **start = scratch_start(e->call.args), **v = start; v != scratch_end(e->call.args); v++) {
-		if (!expect_or(0 <= v-start && v-start < (ptrdiff_t)expecting->array_t.checked_count,
+		if (!expect_or(0 <= v-start && v-start < (ptrdiff_t)expecting->checked_count,
 				v[0]->pos, "trying to assign a value out of bounds of the array.\n")) break;
-		type_check_expr(*v, stk, expecting->array_t.base, RVALUE, e2t, up, true);
+		type_check_expr(*v, stk, expecting->base, RVALUE, e2t, up, true);
 	}
 	type = expecting;
 	break;
 	}
 
-case EXPR_UNARY:
+case EXPR_LOG_NOT:
 	{
 	if (!expect_or(c == RVALUE,
 			e->pos, "cannot assign to result of a function call.\n")) break;
@@ -248,14 +249,14 @@ case EXPR_CALL:
 	type_t *operand = type_check_expr(e->call.operand, stk, &type_none, RVALUE, e2t, up, eval);
 	if (!expect_or(operand->kind == TYPE_FUNC,
 			e->pos, "attempt to call a non-callable:\n")) break;
-	scratch_arr params = operand->func_t.params;
+	scratch_arr params = operand->params;
 	expr **arg = scratch_start(e->call.args);
 	if (!expect_or(scratch_len(e->call.args) / sizeof(expr*) == scratch_len(params) / sizeof(func_arg),
 			e->pos, "function call with the wrong number of arguments provided.\n"))
 		break;
 	for (func_arg *param = scratch_start(params); param != scratch_end(params); param++, arg++)
 		type_check_expr(*arg, stk, param->type, RVALUE, e2t, up, eval);
-	type = operand->func_t.ret_t;
+	type = operand->base;
 	break;
 	}
 
@@ -337,7 +338,7 @@ void type_check_decl(decl_idx i, scope *sc, scope_stack_l *stk, map *e2t, alloca
 	case DECL_FUNC:
 		assert(d->type->kind == TYPE_FUNC);
 		// not much to do with the parameters in here
-		type_check_stmt_block(d->func_d.body, d->type->func_t.ret_t, sc, stk, e2t, up);
+		type_check_stmt_block(d->func_d.body, d->type->base, sc, stk, e2t, up);
 		break;
 	case DECL_NONE:
 		break;

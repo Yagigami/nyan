@@ -39,7 +39,7 @@ case EXPR_INDEX:
 	resolve_expr(e->binary.L, list, up, final);
 	resolve_expr(e->binary.R, list, up, final);
 	break;
-case EXPR_UNARY:
+case EXPR_LOG_NOT:
 	resolve_expr(e->unary.operand, list, up, final);
 	break;
 case EXPR_INITLIST:
@@ -65,6 +65,8 @@ static void resolve_simple_decl(decl_idx i, scope_stack_l *list, allocator *up, 
 	switch (d->kind) {
 	case DECL_VAR:
 		resolve_expr(d->var_d.init, list, up, final);
+		break;
+	case DECL_NONE:
 		break;
 	default:
 		assert(0);
@@ -128,7 +130,7 @@ static void resolve_func(decl_idx i, dyn_arr *add_subscopes, scope_stack_l *list
 	scope *new = dyn_arr_push(add_subscopes, NULL, sizeof *new, up);
 	scope_stack_l top = { .scope=new, .next=list };
 	map_init(&new->refs, 2, up);
-	for (func_arg *arg = scratch_start(f->type->func_t.params); arg != scratch_end(f->type->func_t.params); arg++) {
+	for (func_arg *arg = scratch_start(f->type->params); arg != scratch_end(f->type->params); arg++) {
 		if (!expect_or(arg->type->kind != TYPE_FUNC,
 			f->pos, "you cannot pass a function as a value.\n")) continue;
 		bool inserted;

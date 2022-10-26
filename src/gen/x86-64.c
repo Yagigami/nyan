@@ -330,16 +330,6 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 
 			case SSA_COPY:
 				width = LINFO_GET_SIZE(linfo[i->L]);
-				if (width > 8) {
-					// FIXME: yuck
-					assert(LINFO_GET_SIZE(linfo[i->to]) == width);
-					p = load_rbprel(p, RDI, locals[i->to], 8); // assuming pointers are 8-bytes
-					p = load_rbprel(p, RSI, locals[i->L ], 8);
-					p = mov_imm32(p, RCX, width);
-					*p++ = 0xf2;
-					*p++ = 0xa4;
-					break;
-				}
 				p = load_rbprel(p, RAX, locals[i->L], width);
 				if (linfo[i->to] != linfo[i->L]) { // type conversion
 					p = convert(p, linfo[i->to], linfo[i->L]);
