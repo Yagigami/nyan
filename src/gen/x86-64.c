@@ -1,6 +1,6 @@
 #include "gen/x86-64.h"
 #include "type_check.h"
-#include "ssa.h"
+#include "3ac.h"
 
 #include <assert.h>
 #include <stdint.h>
@@ -192,11 +192,11 @@ idx_t *gen_lalloc(dyn_arr *locals, idx_t *out_stack_space, allocation *to_free, 
 
 	type_info *l = locals->buf.addr;
 	for (idx_t i = 0; i < num_locals; i++) {
-		idx_t align = LINFO_GET_ALIGN(l[i]);
+		idx_t align = TINFO_GET_ALIGN(l[i]);
 		assert(align == 1 || align == 2 || align == 4 || align == 8);
 		stack_space = ALIGN(stack_space, align);
 		local_offsets[i] = stack_space;
-		stack_space += LINFO_GET_SIZE(l[i]);
+		stack_space += TINFO_GET_SIZE(l[i]);
 	}
 
 	if ((stack_space - 8) & 0xF) stack_space = ALIGN(stack_space-8, 16)+8;
@@ -244,8 +244,8 @@ static byte *lea_rip(byte *p, enum x86_64_reg res, idx_t disp32, int bytes)
 static byte *convert(byte *p, type_info to, type_info from)
 {
 	enum x86_64_reg dst = RAX, src = RAX;
-	type_kind to_t = LINFO_GET_TYPE(to), from_t = LINFO_GET_TYPE(from);
-#define COMBINE(TO, FROM) ((TO)+(FROM)*LINFO_TYPE)
+	type_kind to_t = TINFO_GET_TYPE(to), from_t = TINFO_GET_TYPE(from);
+#define COMBINE(TO, FROM) ((TO)+(FROM)*TINFO_TYPE)
 	switch (COMBINE(to_t, from_t)) {
 	case COMBINE(TYPE_INT32, TYPE_INT8 ):
 		*p++ = 0x0f;
@@ -285,7 +285,7 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 	idx_t *labels = ta2.addr;
 	idx_t stack_space;
 	idx_t *locals = gen_lalloc(&src->locals, &stack_space, &temp_alloc, a);
-	type_info *linfo = src->locals.buf.addr;
+	type_info *tinfo = src->locals.buf.addr;
 
 	byte buf[64], *p = buf;
 	// p = endbr64(p);
@@ -305,7 +305,7 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 				break;
 
 			case SSA_SET:
-				width = LINFO_GET_SIZE(linfo[i->L]);
+				width = TINFO_GET_SIZE(tinfo[i->L]);
 				p = load_rbprel(p, RAX, locals[i->L], width);
 				p = load_rbprel(p, RCX, locals[i->R], width);
 				p = cmp(p, RAX, RCX, width);
@@ -314,7 +314,7 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 				break;
 
 			case SSA_BR:
-				width = LINFO_GET_SIZE(linfo[i->L]);
+				width = TINFO_GET_SIZE(tinfo[i->L]);
 				p = load_rbprel(p, RAX, locals[i->L], width);
 				p = load_rbprel(p, RCX, locals[i->R], width);
 				p = cmp(p, RAX, RCX, width);
@@ -329,12 +329,12 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 				break;
 
 			case SSA_COPY:
-				width = LINFO_GET_SIZE(linfo[i->L]);
+				width = TINFO_GET_SIZE(tinfo[i->L]);
 				p = load_rbprel(p, RAX, locals[i->L], width);
-				if (linfo[i->to] != linfo[i->L]) { // type conversion
-					p = convert(p, linfo[i->to], linfo[i->L]);
+				if (tinfo[i->to] != tinfo[i->L]) { // type conversion
+					p = convert(p, tinfo[i->to], tinfo[i->L]);
 				}
-				p = store_rbprel(p, RAX, locals[i->to], LINFO_GET_SIZE(linfo[i->to]));
+				p = store_rbprel(p, RAX, locals[i->to], TINFO_GET_SIZE(tinfo[i->to]));
 				break;
 
 			case SSA_LABEL:
@@ -346,21 +346,21 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 				break;
 
 			case SSA_BOOL_NEG:
-				width = LINFO_GET_SIZE(linfo[i->R]);
+				width = TINFO_GET_SIZE(tinfo[i->R]);
 				p = load_rbprel(p, RDX, locals[i->R], width);
 				p = test(p, RDX, RDX, width);
 				p = setcc_mem(p, locals[i->to], SSAB_EQ); // test dl, dl gives ZF iff dl == 0
 				break;
 
 			case SSA_IMM:
-				width = LINFO_GET_SIZE(linfo[i->to]);
+				width = TINFO_GET_SIZE(tinfo[i->to]);
 				p = mov_imm32(p, RAX, i[1].v);
 				p = store_rbprel(p, RAX, locals[i->to], width);
 				i++; // because of the extension
 				break;
 				
 			case SSA_ADD: case SSA_SUB:
-				width = LINFO_GET_SIZE(linfo[i->to]);
+				width = TINFO_GET_SIZE(tinfo[i->to]);
 				p = load_rbprel(p, RAX, locals[i->to], width);
 				p = load_rbprel(p, RDX, locals[i->R ], width);
 				p = addsub(p, RAX, RDX, i->kind, width);
@@ -368,7 +368,7 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 				break;
 
 			case SSA_MUL:
-				width = LINFO_GET_SIZE(linfo[i->to]);
+				width = TINFO_GET_SIZE(tinfo[i->to]);
 				p = load_rbprel(p, RAX, locals[i->to], width);
 				p = load_rbprel(p, RCX, locals[i->R ], width);
 				p = umul(p, RCX, width);
@@ -376,7 +376,7 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 				break;
 
 			case SSA_MEMCOPY:
-				width = LINFO_GET_SIZE(linfo[i->to]);
+				width = TINFO_GET_SIZE(tinfo[i->to]);
 				// slow and dirty repne movsb
 				p = load_rbprel(p, RDI, locals[i->to], 8); // assuming pointers are 8-bytes
 				p = load_rbprel(p, RSI, locals[i->L ], 8);
@@ -386,21 +386,21 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 				break;
 
 			case SSA_ADDRESS:
-				width = LINFO_GET_SIZE(linfo[i->to]);
+				width = TINFO_GET_SIZE(tinfo[i->to]);
 				assert(width == 8);
 				p = lea(p, RAX, RBP, locals[i->L], width);
 				p = store_rbprel(p, RAX, locals[i->to], width);
 				break;
 
 			case SSA_LOAD:
-				width = LINFO_GET_SIZE(linfo[i->to]);
+				width = TINFO_GET_SIZE(tinfo[i->to]);
 				p = load_rbprel(p, RAX, locals[i->L], 8);
 				p = load(p, RSI, RAX, 0, width);
 				p = store_rbprel(p, RSI, locals[i->to], width);
 				break;
 
 			case SSA_STORE: // .to -> .L
-				width = LINFO_GET_SIZE(linfo[i->to]);
+				width = TINFO_GET_SIZE(tinfo[i->to]);
 				p = load_rbprel(p, RAX, locals[i->to], width);
 				p = load_rbprel(p, RSI, locals[i->L], 8);
 				p = store(p, RAX, RSI, 0, width);
@@ -416,21 +416,21 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 					ssa_extension ext = i[2 + arg/ratio].v;
 					idx_t shift = 8 * (arg % ratio);
 					ssa_ref id = (ext >> shift) & ((1L << (8 * sizeof id)) - 1);
-					p = load_rbprel(p, sysv_arg[arg], locals[id], LINFO_GET_SIZE(linfo[id]));
+					p = load_rbprel(p, sysv_arg[arg], locals[id], TINFO_GET_SIZE(tinfo[id]));
 				}
 				*p++ = 0xe8;
 				idx_t offset = dyn_arr_size(&ins) + p - buf;
 				gen_reloc r = { offset, i[1].v };
 				dyn_arr_push(&refs, &r, sizeof r, a);
 				p = imm32(p, 0);
-				p = store_rbprel(p, RAX, locals[i->to], LINFO_GET_SIZE(linfo[i->to]));
+				p = store_rbprel(p, RAX, locals[i->to], TINFO_GET_SIZE(tinfo[i->to]));
 				i += num_ext;
 				}
 				break;
 
 			case SSA_GLOBAL_REF:
 				{
-				width = LINFO_GET_SIZE(linfo[i->to]);
+				width = TINFO_GET_SIZE(tinfo[i->to]);
 				assert(width == 8);
 				p = lea_rip(p, RAX, 0, width);
 				idx_t offset = dyn_arr_size(&ins) + p - buf - 4;
@@ -442,7 +442,7 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 				}
 
 			case SSA_RET:
-				width = LINFO_GET_SIZE(linfo[i->to]);
+				width = TINFO_GET_SIZE(tinfo[i->to]);
 				p = load_rbprel(p, RAX, locals[i->to], width);
 				p = addsubimm(p, RSP, stack_space, SSA_ADD, 8);
 				p = pop64(p, RBP);
@@ -451,7 +451,7 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 
 			case SSA_ARG:
 				assert(i->L < 6);
-				width = LINFO_GET_SIZE(linfo[i->to]);
+				width = TINFO_GET_SIZE(tinfo[i->to]);
 				// sysV abi: int registers rdi>rsi>rdx>rcx>r8>r9
 				p = store_rbprel(p, sysv_arg[i->L], locals[i->to], width);
 				break;

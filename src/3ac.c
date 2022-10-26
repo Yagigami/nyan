@@ -1,4 +1,4 @@
-#include "ssa.h"
+#include "3ac.h"
 #include "type_check.h"
 #include "dynarr.h"
 #include "ast.h"
@@ -41,18 +41,16 @@ void bytecode_fini(void)
 	dyn_arr_fini(&bytecode.relocs, bytecode.temps);
 }
 
-static int _string_cmp2(key_t L, key_t R) { return L - R; }
-
 typedef struct map_stack {
 	map ast2num;
 	scope *scope;
 	struct map_stack *next;
 } map_stack;
 
-static ssa_ref new_local(dyn_arr *locals, type_info linfo)
+static ssa_ref new_local(dyn_arr *locals, type_info tinfo)
 {
-	ssa_ref num = dyn_arr_size(locals)/sizeof linfo;
-	dyn_arr_push(locals, &linfo, sizeof linfo, bytecode.temps);
+	ssa_ref num = dyn_arr_size(locals)/sizeof tinfo;
+	dyn_arr_push(locals, &tinfo, sizeof tinfo, bytecode.temps);
 	return num;
 }
 
@@ -61,15 +59,15 @@ static void serialize_initlist(byte *blob, expr *e, type_t *t, map *e2t, map_sta
 	switch (e->kind) {
 case EXPR_INITLIST:
 	assert(t->kind == TYPE_ARRAY);
-	type_info linfo = t->base->tinf;
+	type_info tinfo = t->base->tinf;
 	for (expr **part = scratch_start(e->call.args); part != scratch_end(e->call.args); part++) {
 		serialize_initlist(blob, *part, t->base, e2t, stk);
-		blob += LINFO_GET_SIZE(linfo); // TODO: basically query the `next` insert pos from a layout structure
+		blob += TINFO_GET_SIZE(tinfo); // TODO: basically query the `next` insert pos from a layout structure
 	}
 	break;
 case EXPR_INT:
 	// little endian things
-	memcpy(blob, &e->value, LINFO_GET_SIZE(t->tinf));
+	memcpy(blob, &e->value, TINFO_GET_SIZE(t->tinf));
 	break;
 case EXPR_BOOL:
 	memcpy(blob, &e->value, 1);
@@ -96,20 +94,20 @@ static map_entry global_name(ident_t name, size_t len, allocator *a)
 // 12 ---> rvalue = REF_NONE
 static ident_t ir3_expr(ir3_func *f, expr *e, map *e2t, map_stack *stk, ssa_ref rvalue, allocator *a)
 {
-	map_entry *asso = map_find(e2t, (key_t) e, intern_hash((key_t) e), _string_cmp2); assert(asso);
+	map_entry *asso = map_find(e2t, (key_t) e, intern_hash((key_t) e), intern_cmp); assert(asso);
 	type_t *type = (type_t*) asso->v;
-	type_info linfo = type->tinf;
+	type_info tinfo = type->tinf;
 	switch (e->kind) {
 	ssa_ref number;
 case EXPR_INT:
-	number = new_local(&f->locals, linfo);
+	number = new_local(&f->locals, tinfo);
 	assert(e->value <= (ssa_extension)-1);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_IMM, number }, sizeof(ssa_instr), a);
 	// just little endian things // btw this is undefined behavior
 	dyn_arr_push(&f->ins, &e->value, sizeof(ssa_extension), a);
 	return number;
 case EXPR_BOOL:
-	number = new_local(&f->locals, linfo);
+	number = new_local(&f->locals, tinfo);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_BOOL, number, e->name == tokens.kw_true }, sizeof(ssa_instr), a);
 	return number;
 	
@@ -117,12 +115,12 @@ case EXPR_NAME:
 	{
 	ident_t name = e->name;
 	size_t h = intern_hash(name);
-	map_entry *ent = map_find(&stk->ast2num, name, h, _string_cmp2);
+	map_entry *ent = map_find(&stk->ast2num, name, h, intern_cmp);
 	map_stack *it = stk;
 	while (!ent) {
 		if (it->next) {
 			it = it->next;
-			ent = map_find(&it->ast2num, name, h, _string_cmp2);
+			ent = map_find(&it->ast2num, name, h, intern_cmp);
 		} else {
 			// TODO: find a better way to handle this maybe lol
 			return ~name;
@@ -161,7 +159,7 @@ case EXPR_CALL:
 	if (num_args)
 		memcpy(instr++, buf, sizeof buf);
 	// post after the arguments are evaluated
-	number = call->to = new_local(&f->locals, linfo);
+	number = call->to = new_local(&f->locals, tinfo);
 	call = dyn_arr_push(&f->ins, m.addr, (void*) instr - m.addr, a);
 	static_assert(((ident_t) -1) < 0, "");
 	if (func < 0) {
@@ -175,7 +173,7 @@ case EXPR_ADD:
 	{
 	ssa_ref L = ir3_expr(f, e->binary.L, e2t, stk, REF_NONE, a);
 	ssa_ref R = ir3_expr(f, e->binary.R, e2t, stk, REF_NONE, a);
-	number = new_local(&f->locals, linfo);
+	number = new_local(&f->locals, tinfo);
 	token_kind op = e->binary.op;
 	enum ssa_opcode opc = 	op == '+' ? SSA_ADD:
 				op == '-' ? SSA_SUB:
@@ -188,7 +186,7 @@ case EXPR_CMP:
 	{
 	ssa_ref L = ir3_expr(f, e->binary.L, e2t, stk, REF_NONE, a);
 	ssa_ref R = ir3_expr(f, e->binary.R, e2t, stk, REF_NONE, a);
-	number = new_local(&f->locals, linfo);
+	number = new_local(&f->locals, tinfo);
 	token_kind op = e->binary.op;
 	enum ssa_branch_cc cc =	op == TOKEN_EQ ? SSAB_EQ: op == TOKEN_NEQ? SSAB_NE:
 				op == '<'      ? SSAB_LT: op == TOKEN_LEQ? SSAB_LE:
@@ -205,7 +203,7 @@ case EXPR_CMP:
 case EXPR_LOG_NOT:
 	{
 	ssa_ref inner = ir3_expr(f, e->unary.operand, e2t, stk, REF_NONE, a);
-	number = new_local(&f->locals, linfo);
+	number = new_local(&f->locals, tinfo);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_BOOL_NEG, number, inner }, sizeof(ssa_instr), a);
 	return number;
 	}
@@ -216,16 +214,16 @@ case EXPR_ADDRESS:
 	assert(rvalue == REF_NONE);
 	if (sub->kind == EXPR_NAME) {
 		ssa_ref name = ir3_expr(f, sub, e2t, stk, REF_NONE, a);
-		number = new_local(&f->locals, linfo);
+		number = new_local(&f->locals, tinfo);
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ADDRESS, number, name }, sizeof(ssa_instr), a);
 		return number;
 	} else if (sub->kind == EXPR_INDEX) {
 		ssa_ref index = ir3_expr(f, sub->binary.R, e2t, stk, REF_NONE, a);
 		ssa_ref base = ir3_expr(f, sub->binary.L, e2t, stk, REF_NONE, a);
 		type_info *base_tinfo = f->locals.buf.addr + base * sizeof *base_tinfo;
-		number = new_local(&f->locals, linfo);
+		number = new_local(&f->locals, tinfo);
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_IMM, number }, sizeof(ssa_instr), a);
-		dyn_arr_push(&f->ins, &(ssa_instr){ .v=LINFO_GET_SIZE(*base_tinfo) }, sizeof(ssa_instr), a);
+		dyn_arr_push(&f->ins, &(ssa_instr){ .v=TINFO_GET_SIZE(*base_tinfo) }, sizeof(ssa_instr), a);
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_MUL, number, number, index }, sizeof(ssa_instr), a);
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ADD, number, number, base }, sizeof(ssa_instr), a);
 		return number;
@@ -238,11 +236,11 @@ case EXPR_INDEX:
 	ssa_ref base = ir3_expr(f, e->binary.L, e2t, stk, REF_NONE, a);
 	ssa_ref addr = new_local(&f->locals, TINFO_PTR);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_IMM, addr }, sizeof(ssa_instr), a);
-	dyn_arr_push(&f->ins, &(ssa_instr){ .v=LINFO_GET_SIZE(linfo) }, sizeof(ssa_instr), a);
+	dyn_arr_push(&f->ins, &(ssa_instr){ .v=TINFO_GET_SIZE(tinfo) }, sizeof(ssa_instr), a);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_MUL, addr, addr, index }, sizeof(ssa_instr), a);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ADD, addr, addr, base }, sizeof(ssa_instr), a);
 	if (rvalue == REF_NONE) {
-		number = new_local(&f->locals, linfo);
+		number = new_local(&f->locals, tinfo);
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_LOAD, number, addr }, sizeof(ssa_instr), a);
 		return number;
 	} else {
@@ -253,7 +251,7 @@ case EXPR_INDEX:
 
 case EXPR_INITLIST:
 	{
-	ir3_sym blob = { .m=ALLOC(a, LINFO_GET_SIZE(linfo), 8), .align=LINFO_GET_ALIGN(linfo), .kind=IR3_BLOB };
+	ir3_sym blob = { .m=ALLOC(a, TINFO_GET_SIZE(tinfo), 8), .align=TINFO_GET_ALIGN(tinfo), .kind=IR3_BLOB };
 	idx_t ref = dyn_arr_size(&bytecode.blob) / sizeof blob;
 	dyn_arr_push(&bytecode.blob, &blob, sizeof blob, a);
 	serialize_initlist(blob.m.addr, e, type, e2t, stk);
@@ -266,7 +264,7 @@ case EXPR_INITLIST:
 	ssa_ref local = new_local(&f->locals, TINFO_INT64);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_GLOBAL_REF, local }, sizeof(ssa_instr), a);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .v=ref }, sizeof(ssa_extension), a);
-	ssa_ref target = new_local(&f->locals, linfo);
+	ssa_ref target = new_local(&f->locals, tinfo);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_MEMCOPY, target, local }, sizeof(ssa_instr), a);
 	return target;
 	}
@@ -292,10 +290,10 @@ static void ir3_decl(ir3_func *f, decl_idx i, map *e2t, map_stack *stk, allocato
 case DECL_VAR:
 	{
 	ssa_ref val = ir3_expr(f, d->var_d.init, e2t, stk, REF_NONE, a);
-	assert(!map_find(&stk->ast2num, d->name, intern_hash(d->name), _string_cmp2));
+	assert(!map_find(&stk->ast2num, d->name, intern_hash(d->name), intern_cmp));
 	map_entry *e = map_add(&stk->ast2num, d->name, intern_hash, a);
 	e->k = d->name;
-	map_entry *init_entry = map_find(e2t, (key_t) d->var_d.init, intern_hash((key_t) d->var_d.init), _string_cmp2); assert(init_entry);
+	map_entry *init_entry = map_find(e2t, (key_t) d->var_d.init, intern_hash((key_t) d->var_d.init), intern_cmp); assert(init_entry);
 	type_t *init_type = (type_t*) init_entry->v;
 	if (d->var_d.init->kind == EXPR_NAME || d->type->tinf != init_type->tinf) {
 		ssa_ref number = new_local(&f->locals, d->type->tinf);
@@ -455,8 +453,8 @@ static void ir3_decl_func(ir3_func *f, decl *d, map *e2t, map_stack *stk, scope*
 		map_entry *e = map_add(&top.ast2num, arg->name, intern_hash, a);
 		e->k = arg->name;
 		e->v = arg - start;
-		type_info linfo = arg->type->tinf;
-		dyn_arr_push(&f->locals, &linfo, sizeof linfo, a);
+		type_info tinfo = arg->type->tinf;
+		dyn_arr_push(&f->locals, &tinfo, sizeof tinfo, a);
 		// %2 = arg.2
 		// no real constraint for both to be the same
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ARG, arg - start, arg - start }, sizeof(ssa_instr), a);
@@ -474,7 +472,7 @@ static void patch_relocs(ir3_module mod, map *ast2num)
 	ir3_sym *base_syms = scratch_start(mod);
 	for (ir3_reloc *reloc = bytecode.relocs.buf.addr; reloc != bytecode.relocs.end; reloc++) {
 		ir3_sym *sym = &base_syms[reloc->sym_in];
-		map_entry *e = map_find(ast2num, reloc->ref, intern_hash(reloc->ref), _string_cmp2); assert(e);
+		map_entry *e = map_find(ast2num, reloc->ref, intern_hash(reloc->ref), intern_cmp); assert(e);
 		ssa_instr *ins = sym->f.ins.buf.addr + reloc->offset_in;
 		ins->v = e->v;
 	}

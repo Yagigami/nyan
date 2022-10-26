@@ -1,7 +1,7 @@
 #ifndef NYAN_GEN_X86_64_H
 #define NYAN_GEN_X86_64_H
 
-#include "ssa.h"
+#include "3ac.h"
 #include "dynarr.h"
 #include "token.h"
 #include "alloc.h"

@@ -6,7 +6,7 @@
 #include <assert.h>
 
 #include "token.h"
-#include "ssa.h"
+#include "3ac.h"
 #include "alloc.h"
 #include "ast.h"
 

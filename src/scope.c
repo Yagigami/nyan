@@ -3,23 +3,19 @@
 #include "print.h"
 
 
-// the strings here are already interned
-// I hecking love C's int comparisons batchest
-static int _string_cmp2(key_t L, key_t R) { return L-R; }
-
 static void resolve_expr(expr *e, scope_stack_l *list, allocator *up, allocator *final)
 {
 	switch (e->kind) {
 case EXPR_NAME:
 	{
 	size_t h = intern_hash(e->name);
-	map_entry *name = map_find(&list->scope->refs, e->name, h, _string_cmp2);
+	map_entry *name = map_find(&list->scope->refs, e->name, h, intern_cmp);
 	for (scope_stack_l *it = list->next; !name; it = it->next) {
 		if (!expect_or(it != NULL,
 				e->pos, "the identifier ", e->name,
 				" is used but never defined.\n"))
 			return;
-		name = map_find(&it->scope->refs, e->name, h, _string_cmp2);
+		name = map_find(&it->scope->refs, e->name, h, intern_cmp);
 	}
 	}
 	break;
@@ -57,7 +53,7 @@ static void resolve_simple_decl(decl_idx i, scope_stack_l *list, allocator *up, 
 {
 	decl *d = idx2decl(i);
 	bool inserted;
-	map_entry *e = map_id(&list->scope->refs, d->name, intern_hash, _string_cmp2, &inserted, up);
+	map_entry *e = map_id(&list->scope->refs, d->name, intern_hash, intern_cmp, &inserted, up);
 	if (!expect_or(inserted,
 		d->pos, "the symbol ", d->name, " redefines",
 		scope2decl(e->v)->pos  , "in the same scope.\n")) return;
@@ -134,7 +130,7 @@ static void resolve_func(decl_idx i, dyn_arr *add_subscopes, scope_stack_l *list
 		if (!expect_or(arg->type->kind != TYPE_FUNC,
 			f->pos, "you cannot pass a function as a value.\n")) continue;
 		bool inserted;
-		map_entry *e = map_id(&new->refs, arg->name, intern_hash, _string_cmp2, &inserted, up);
+		map_entry *e = map_id(&new->refs, arg->name, intern_hash, intern_cmp, &inserted, up);
 		if (!expect_or(inserted,
 			f->pos, "the symbol ", arg->name, " redefines",
 			scope2decl(e->v)->pos, "in the same scope.\n")) continue;
@@ -160,7 +156,7 @@ void resolve_refs(module_t of, scope *to, allocator *up, allocator *final)
 	for (decl_idx *it = start; it != end; it++) {
 		decl *d = idx2decl(*it);
 		bool inserted;
-		map_entry *e = map_id(&to->refs, d->name, intern_hash, _string_cmp2, &inserted, up);
+		map_entry *e = map_id(&to->refs, d->name, intern_hash, intern_cmp, &inserted, up);
 		if (!expect_or(inserted,
 					d->pos, "the symbol ", d->name, " is redeclared here.\n",
 					scope2decl(e->v)->pos, "it was previously declared here.\n")) continue;

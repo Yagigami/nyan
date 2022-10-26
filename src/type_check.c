@@ -4,7 +4,7 @@
 #include <stdbool.h>
 
 
-const type_info linfo_tbl[TYPE_NUM] = {
+const type_info tinfo_tbl[TYPE_NUM] = {
 	[TYPE_NONE] = TINFO_NONE,
 	[TYPE_INT8] = TINFO_INT8,
 	[TYPE_INT32] = TINFO_INT32,
@@ -16,8 +16,6 @@ const type_info linfo_tbl[TYPE_NUM] = {
 static struct type_checker_state {
 	allocator *temps;
 } types;
-
-static int _string_cmp2(ident_t L, ident_t R) { return L - R; }
 
 // TODO: temporary
 static type_t type_none = { .kind=TYPE_NONE, .tinf=TINFO_NONE };
@@ -106,7 +104,7 @@ static void complete_type(type_t *t, scope_stack_l *stk, map *e2t, allocator *up
 		complete_type(t->base, stk, e2t, up);
 		t->checked_count = t->unchecked_count->value;
 		base = t->base->tinf;
-		t->tinf = LINFO(t->checked_count * LINFO_GET_SIZE(base), LINFO_GET_L2ALIGN(base), TYPE_ARRAY);
+		t->tinf = TINFO(t->checked_count * TINFO_GET_SIZE(base), TINFO_GET_L2ALIGN(base), TYPE_ARRAY);
 		break;
 	default:
 		__builtin_unreachable();
@@ -134,10 +132,10 @@ case EXPR_NAME:
 	{
 	// LVALUE is ok
 	if (!expect_or(!eval, e->pos, "cannot evaluate a variable in a compilation context.\n")) break;
-	map_entry *entry = map_find(&stk->scope->refs, e->name, intern_hash(e->name), _string_cmp2);
+	map_entry *entry = map_find(&stk->scope->refs, e->name, intern_hash(e->name), intern_cmp);
 	while (!entry && stk->next) {
 		stk = stk->next;
-		entry = map_find(&stk->scope->refs, e->name, intern_hash(e->name), _string_cmp2);
+		entry = map_find(&stk->scope->refs, e->name, intern_hash(e->name), intern_cmp);
 	}
 	if (entry) type = (type_t*) entry->v;
 	break;
@@ -154,7 +152,7 @@ case EXPR_CMP:
 	type_t *R = type_check_expr(Rv, stk, e->kind == EXPR_ADD? &type_int64: &type_none, RVALUE, e2t, up, eval);
 	expr *smaller_e = Rv;
 	type_t *bigger = L, *smaller = R;
-	int cmp = LINFO_GET_SIZE(L->tinf) - LINFO_GET_SIZE(R->tinf);
+	int cmp = TINFO_GET_SIZE(L->tinf) - TINFO_GET_SIZE(R->tinf);
 	if (cmp > 0) {
 		smaller_e = Rv = e->binary.R = expr_convert(up, Rv, bigger = L);
 		map_entry *asso = map_add(e2t, (key_t) Rv, intern_hash, types.temps);
@@ -201,7 +199,7 @@ case EXPR_INDEX:
 	if (!expect_or(base->kind == TYPE_PTR,
 			e->pos, "attempt to index something that does not support indexing.\n")) break;
 	type_t *index = type_check_expr(e->binary.R, stk, &type_int64, RVALUE, e2t, up, eval);
-	if (LINFO_GET_SIZE(index->tinf) < LINFO_GET_SIZE(TINFO_INT64)) {
+	if (TINFO_GET_SIZE(index->tinf) < TINFO_GET_SIZE(TINFO_INT64)) {
 		e->binary.R = expr_convert(up, e->binary.R, &type_int64);
 		map_entry *asso = map_add(e2t, (key_t) e->binary.R, intern_hash, types.temps);
 		asso->k = (key_t) e->binary.R;

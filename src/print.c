@@ -1,7 +1,7 @@
 #include "print.h"
 #include "token.h"
 #include "map.h"
-#include "ssa.h"
+#include "3ac.h"
 #include "type_check.h"
 
 #include <stdarg.h>
@@ -59,7 +59,7 @@ static int fprint_source_line(FILE *to, source_idx offset)
 
 static int fprint_ir3_instr(FILE *to, const ssa_instr *i, int *extra_offset, const dyn_arr *locals)
 {
-	type_info *linfo = locals->buf.addr + i->to * sizeof *linfo;
+	type_info *tinfo = locals->buf.addr + i->to * sizeof *tinfo;
 	static const char *type2s[TYPE_NUM] = {
 		[TYPE_NONE] = "<none>",
 		[TYPE_INT8] = "int8", [TYPE_INT32] = "int32", [TYPE_INT64] = "int64",
@@ -68,7 +68,7 @@ static int fprint_ir3_instr(FILE *to, const ssa_instr *i, int *extra_offset, con
 		[TYPE_FUNC] = "func",
 		[TYPE_PTR] = "ptr",
 	};
-#define T type2s[LINFO_GET_TYPE(*linfo)]
+#define T type2s[TINFO_GET_TYPE(*tinfo)]
 	static const char *opc2s[SSAB_GE-SSAB_EQ+1] = { "eq", "ne", "lt", "le", "gt", "ge" };
 	switch (i->kind) {
 	case SSA_SET:
@@ -101,7 +101,7 @@ static int fprint_ir3_instr(FILE *to, const ssa_instr *i, int *extra_offset, con
 	case SSA_RET: return fprintf(to, "ret %%%hhx\n", i->to);
 	case SSA_GOTO: return fprintf(to, "goto L%hhx\n", i->to);
 	case SSA_LABEL: return fprintf(to, "label L%hhx\n", i->to);
-	case SSA_COPY: return fprintf(to, "%%%hhx:%s = %%%hhx:%s\n", i->to, T, i->L, type2s[LINFO_GET_TYPE(linfo[i->L - i->to])]);
+	case SSA_COPY: return fprintf(to, "%%%hhx:%s = %%%hhx:%s\n", i->to, T, i->L, type2s[TINFO_GET_TYPE(tinfo[i->L - i->to])]);
 	case SSA_BOOL: return fprintf(to, "%%%hhx:%s = %db\n", i->to, T, i->L);
 	case SSA_ARG: return fprintf(to, "%%%hhx:%s = args.%hhx\n", i->to, T, i->L);
 	case SSA_LOAD: return fprintf(to, "%%%hhx:%s = load %%%hhx\n", i->to, T, i->L);

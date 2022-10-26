@@ -97,6 +97,7 @@ void token_skip_to_newline(void);
 
 size_t string_hash(key_t k);
 size_t intern_hash(key_t k);
+static inline int intern_cmp(key_t L, key_t R) { return L - R; }
 
 source_idx token_pos(void);
 const char *token_source(source_idx pos);

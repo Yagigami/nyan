@@ -258,7 +258,7 @@ type_t *parse_type_target(type_t *base, allocator *up)
 		tgt->tinf = -1;
 		tgt->kind = TYPE_ARRAY;
 		tgt->base = base;
-		expr *len = tgt->unchecked_count = parse_expr(up);
+		tgt->unchecked_count = parse_expr(up);
 		if (!token_expect(']')) goto err;
 		base = tgt;
 	}

@@ -15,26 +15,26 @@ void type_init(allocator *temps);
 void type_fini(void);
 
 typedef uint32_t type_info;
-extern const type_info linfo_tbl[TYPE_NUM];
+extern const type_info tinfo_tbl[TYPE_NUM];
 
-#define LINFO_TYPE 5
-static_assert((1 << LINFO_TYPE) >= TYPE_NUM, "");
-#define LINFO_ALIGN 3
-#define LINFO_SIZE 24
+#define TINFO_TYPE 5
+static_assert((1 << TINFO_TYPE) >= TYPE_NUM, "");
+#define TINFO_ALIGN 3
+#define TINFO_SIZE 24
 
-#define LINFO(size,log2a,type) ((type)|(log2a)<<LINFO_TYPE|(size)<<(LINFO_TYPE+LINFO_ALIGN))
-#define LINFO_GET_SIZE(linfo) ((linfo)>>(LINFO_TYPE+LINFO_ALIGN))
-#define LINFO_GET_L2ALIGN(linfo) (((linfo)>>LINFO_TYPE)&((1<<LINFO_ALIGN)-1))
-#define LINFO_GET_ALIGN(linfo) (1<<LINFO_GET_L2ALIGN(linfo))
-#define LINFO_GET_TYPE(linfo) ((linfo)&((1<<LINFO_TYPE)-1))
+#define TINFO(size,log2a,type) ((type)|(log2a)<<TINFO_TYPE|(size)<<(TINFO_TYPE+TINFO_ALIGN))
+#define TINFO_GET_SIZE(tinfo) ((tinfo)>>(TINFO_TYPE+TINFO_ALIGN))
+#define TINFO_GET_L2ALIGN(tinfo) (((tinfo)>>TINFO_TYPE)&((1<<TINFO_ALIGN)-1))
+#define TINFO_GET_ALIGN(tinfo) (1<<TINFO_GET_L2ALIGN(tinfo))
+#define TINFO_GET_TYPE(tinfo) ((tinfo)&((1<<TINFO_TYPE)-1))
 
-#define TINFO_NONE LINFO(0, 0, TYPE_NONE)
-#define TINFO_INT8 LINFO(1, 0, TYPE_INT8)
-#define TINFO_INT32 LINFO(4, 2, TYPE_INT32)
-#define TINFO_INT64 LINFO(8, 3, TYPE_INT64)
-#define TINFO_BOOL LINFO(1, 0, TYPE_BOOL)
-#define TINFO_FUNC LINFO(0, 0, TYPE_FUNC)
-#define TINFO_PTR LINFO(8, 3, TYPE_PTR)
+#define TINFO_NONE TINFO(0, 0, TYPE_NONE)
+#define TINFO_INT8 TINFO(1, 0, TYPE_INT8)
+#define TINFO_INT32 TINFO(4, 2, TYPE_INT32)
+#define TINFO_INT64 TINFO(8, 3, TYPE_INT64)
+#define TINFO_BOOL TINFO(1, 0, TYPE_BOOL)
+#define TINFO_FUNC TINFO(0, 0, TYPE_FUNC)
+#define TINFO_PTR TINFO(8, 3, TYPE_PTR)
 
 #endif /* NYAN_TYPE_CHECK_H */
 
