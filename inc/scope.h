@@ -7,7 +7,7 @@
 
 typedef struct scope {
 	scratch_arr sub; // array of the sub-scopes
-	map refs; // k: ident_t, v: type*
+	map refs; // k: ident_t, v: decl*
 } scope;
 
 // those can be embedded in the call stack

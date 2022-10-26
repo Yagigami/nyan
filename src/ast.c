@@ -38,9 +38,9 @@ static expr *parse_expr_atom(allocator *up);
 static expr *parse_expr_postfix(allocator *up);
 static expr *parse_expr_add(allocator *up);
 
-static type_t *parse_type(allocator *up);
-static type_t *parse_type_prim(allocator *up);
-static type_t *parse_type_target(type_t *base, allocator *up);
+static type *parse_type(allocator *up);
+static type *parse_type_prim(allocator *up);
+static type *parse_typearget(type *base, allocator *up);
 static void parse_type_params(dyn_arr *p, allocator *up);
 
 typedef struct {
@@ -74,7 +74,7 @@ static expr *new_expr(allocator *up)
 	return e;
 }
 
-expr *expr_convert(allocator *a, expr *e, type_t *to)
+expr *expr_convert(allocator *a, expr *e, type *to)
 {
 	expr *cvt = new_expr(a);
 	cvt->kind = EXPR_CONVERT;
@@ -193,6 +193,22 @@ expr *parse_expr_cmp(allocator *up)
 	return L;
 }
 
+expr *parse_expr_cvt(allocator *up)
+{
+	expr *inner = parse_expr_cmp(up);
+	if (token_match(':')) {
+		type *t = parse_type(up);
+		expr *outer = new_expr(up);
+		outer->kind = EXPR_CONVERT;
+		outer->convert.operand = inner;
+		outer->convert.type = t;
+		outer->pos = inner->pos;
+		inner = outer;
+	}
+	expect_or(!token_match(':'), inner->pos, "A cast-expression may not be cast again.\n");
+	return inner;
+}
+
 expr *parse_expr(allocator *up)
 {
 	// `{ 1, "hello" } + v` will never happen, so there is no need
@@ -211,7 +227,7 @@ expr *parse_expr(allocator *up)
 		token_expect('}');
 		init->kind = EXPR_INITLIST;
 		return init;
-	} else return parse_expr_cmp(up);
+	} else return parse_expr_cvt(up);
 }
 
 void parse_type_params(dyn_arr *p, allocator *up)
@@ -229,9 +245,9 @@ void parse_type_params(dyn_arr *p, allocator *up)
 	}
 }
 
-type_t *parse_type_prim(allocator *up)
+type *parse_type_prim(allocator *up)
 {
-	type_t *prim = ALLOC(up, sizeof *prim, 8).addr;
+	type *prim = ALLOC(up, sizeof *prim, 8).addr;
 	prim->tinf = -1;
 	if (token_match_kw(tokens.kw_func)) {
 		prim->kind = TYPE_FUNC;
@@ -251,10 +267,10 @@ type_t *parse_type_prim(allocator *up)
 	return prim;
 }
 
-type_t *parse_type_target(type_t *base, allocator *up)
+type *parse_typearget(type *base, allocator *up)
 {
 	while (token_match('[')) {
-		type_t *tgt = ALLOC(up, sizeof *tgt, alignof *tgt).addr;
+		type *tgt = ALLOC(up, sizeof *tgt, alignof *tgt).addr;
 		tgt->tinf = -1;
 		tgt->kind = TYPE_ARRAY;
 		tgt->base = base;
@@ -266,10 +282,10 @@ err:
 	return base;
 }
 
-type_t *parse_type(allocator *up)
+type *parse_type(allocator *up)
 {
-	type_t *t = parse_type_prim(up);
-	t = parse_type_target(t, up);
+	type *t = parse_type_prim(up);
+	t = parse_typearget(t, up);
 	if (t->kind == TYPE_FUNC) {
 		dyn_arr params;
 		dyn_arr_init(&params, 0*sizeof(func_arg), ast.temps);

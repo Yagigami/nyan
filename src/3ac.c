@@ -54,7 +54,7 @@ static ssa_ref new_local(dyn_arr *locals, type_info tinfo)
 	return num;
 }
 
-static void serialize_initlist(byte *blob, expr *e, type_t *t, map *e2t, map_stack *stk)
+static void serialize_initlist(byte *blob, expr *e, type *t, map *e2t, map_stack *stk)
 {
 	switch (e->kind) {
 case EXPR_INITLIST:
@@ -95,8 +95,8 @@ static map_entry global_name(ident_t name, size_t len, allocator *a)
 static ident_t ir3_expr(ir3_func *f, expr *e, map *e2t, map_stack *stk, ssa_ref rvalue, allocator *a)
 {
 	map_entry *asso = map_find(e2t, (key_t) e, intern_hash((key_t) e), intern_cmp); assert(asso);
-	type_t *type = (type_t*) asso->v;
-	type_info tinfo = type->tinf;
+	type *t = (type*) asso->v;
+	type_info tinfo = t->tinf;
 	switch (e->kind) {
 	ssa_ref number;
 case EXPR_INT:
@@ -254,7 +254,7 @@ case EXPR_INITLIST:
 	ir3_sym blob = { .m=ALLOC(a, TINFO_GET_SIZE(tinfo), 8), .align=TINFO_GET_ALIGN(tinfo), .kind=IR3_BLOB };
 	idx_t ref = dyn_arr_size(&bytecode.blob) / sizeof blob;
 	dyn_arr_push(&bytecode.blob, &blob, sizeof blob, a);
-	serialize_initlist(blob.m.addr, e, type, e2t, stk);
+	serialize_initlist(blob.m.addr, e, t, e2t, stk);
 	char buf[16];
 	int len = snprintf(buf, sizeof buf, ".G%x", ref);
 	assert(buf[len] == '\0');
@@ -294,7 +294,7 @@ case DECL_VAR:
 	map_entry *e = map_add(&stk->ast2num, d->name, intern_hash, a);
 	e->k = d->name;
 	map_entry *init_entry = map_find(e2t, (key_t) d->var_d.init, intern_hash((key_t) d->var_d.init), intern_cmp); assert(init_entry);
-	type_t *init_type = (type_t*) init_entry->v;
+	type *init_type = (type*) init_entry->v;
 	if (d->var_d.init->kind == EXPR_NAME || d->type->tinf != init_type->tinf) {
 		ssa_ref number = new_local(&f->locals, d->type->tinf);
 		e->v = number;
@@ -600,7 +600,7 @@ void test_3ac(void)
 	allocator *gpa = (allocator*)&malloc_allocator;
 	ast_init(gpa);
 	allocator_geom perma; allocator_geom_init(&perma, 16, 8, 0x100, gpa);
-	token_init("nyan/basic.nyan", ast.temps, &perma.base);
+	token_init("nyan/simpler.nyan", ast.temps, &perma.base);
 	allocator_geom just_ast; allocator_geom_init(&just_ast, 10, 8, 0x100, gpa);
 	module_t module = parse_module(&just_ast.base);
 	scope global;
@@ -628,7 +628,7 @@ void test_3ac(void)
 		dump_3ac(m2ac, bytecode.names.buf.addr);
 
 		gen_module gen = gen_x86_64(m2ac, gpa);
-		int e = elf_object_from(&gen, "basic.o", &bytecode.names, gpa);
+		int e = elf_object_from(&gen, "simpler.o", &bytecode.names, gpa);
 		if (e < 0) perror("objfile not generated");
 
 		gen_fini(&gen, gpa);

@@ -1,3 +1,10 @@
+ddef func(): int32
+{
+	a: int32 = 1;
+	// a: int32 = 2;
+	return a;
+}
+
 diffsizes func(): int32
 {
 	a: int8 = 9;
@@ -9,6 +16,8 @@ diffsizes func(): int32
 	h: int64 = 1 + b;
 	f: int32 = a + c;
 	// g: int8 = f;
+	i: int8 = f: int8;
+	j: int8 = (i: bool): int8;
 	return f;
 }
 

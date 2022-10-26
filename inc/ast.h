@@ -16,12 +16,12 @@ typedef idx_t decl_idx;
 typedef enum type_kind {
 	TYPE_NONE,
 
+	TYPE_BOOL,
+	TYPE_PRIMITIVE_BEGIN = TYPE_BOOL,
 	TYPE_INT8,
-	TYPE_PRIMITIVE_BEGIN = TYPE_INT8,
 	TYPE_INT32,
 	TYPE_INT64,
-	TYPE_BOOL,
-	TYPE_PRIMITIVE_END = TYPE_BOOL,
+	TYPE_PRIMITIVE_END = TYPE_INT64,
 
 	TYPE_FUNC,
 	TYPE_CHAINED = TYPE_FUNC,
@@ -70,11 +70,11 @@ typedef enum expr_kind {
 struct expr;
 struct decl;
 struct stmt;
-struct type_t;
+struct type;
 typedef uint32_t type_info;
 
-typedef struct type_t {
-	struct type_t *base;
+typedef struct type {
+	struct type *base;
 	union {
 		// func_arg array
 		scratch_arr params;
@@ -84,11 +84,11 @@ typedef struct type_t {
 	};
 	type_kind kind;
 	type_info tinf;
-} type_t;
+} type;
 
 typedef struct func_arg {
 	ident_t name;
-	type_t *type;
+	type *type;
 } func_arg;
 
 typedef struct expr {
@@ -109,7 +109,7 @@ typedef struct expr {
 		} unary;
 		struct {
 			struct expr *operand;
-			type_t *type;
+			type *type;
 		} convert;
 	};
 	expr_kind kind;
@@ -120,7 +120,7 @@ typedef scratch_arr stmt_block; // array of stmt*
 
 typedef struct decl {
 	ident_t name;
-	type_t *type;
+	type *type;
 	union {
 		struct {
 			expr *init;
@@ -160,7 +160,7 @@ void ast_one_more_error(void);
 module_t parse_module(allocator *up);
 decl *idx2decl(decl_idx i);
 
-expr *expr_convert(allocator *a, expr *e, type_t *to);
+expr *expr_convert(allocator *a, expr *e, type *to);
 
 #define AST_DUP(a,v) ast_dup((a),&(v),sizeof (v))
 

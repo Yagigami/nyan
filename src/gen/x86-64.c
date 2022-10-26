@@ -181,6 +181,14 @@ static byte *setcc_mem(byte *p, idx_t offset, enum ssa_branch_cc cc)
 	return emit_disp(p, 0, RBP, offset);
 }
 
+static byte *setcc(byte *p, enum x86_64_reg reg, enum ssa_branch_cc cc)
+{
+	*p++ = 0x0f;
+	*p++ = 0x90 | bc2cc[cc];
+	*p++ = modrm(3, reg, 0);
+	return p;
+}
+
 #define ALIGN(N,A) (((N)+(A)-1)/(A)*(A))
 
 idx_t *gen_lalloc(dyn_arr *locals, idx_t *out_stack_space, allocation *to_free, allocator *a)
@@ -247,9 +255,33 @@ static byte *convert(byte *p, type_info to, type_info from)
 	type_kind to_t = TINFO_GET_TYPE(to), from_t = TINFO_GET_TYPE(from);
 #define COMBINE(TO, FROM) ((TO)+(FROM)*TINFO_TYPE)
 	switch (COMBINE(to_t, from_t)) {
+	case COMBINE(TYPE_BOOL, TYPE_INT8 ):
+	case COMBINE(TYPE_BOOL, TYPE_INT32):
+	case COMBINE(TYPE_BOOL, TYPE_INT64):
+		p = test(p, RAX, RAX, TINFO_GET_SIZE(from));
+		p = setcc(p, RAX, SSAB_NE);
+		break;
+	case COMBINE(TYPE_INT8, TYPE_BOOL):
+		// bool is 8 bits so nothing to do here
+	case COMBINE(TYPE_INT8, TYPE_INT32):
+	case COMBINE(TYPE_INT8, TYPE_INT64):
+	case COMBINE(TYPE_INT32, TYPE_INT64):
+		// narrowing conversions are no-ops
+		break;
+	case COMBINE(TYPE_INT32, TYPE_BOOL):
+		*p++ = 0x0f;
+		*p++ = 0xb6;
+		*p++ = modrm(3, src, dst);
+		break;
 	case COMBINE(TYPE_INT32, TYPE_INT8 ):
 		*p++ = 0x0f;
 		*p++ = 0xbe;
+		*p++ = modrm(3, src, dst);
+		break;
+	case COMBINE(TYPE_INT64, TYPE_BOOL):
+		*p++ = rex(1, dst>>3, 0, src>>3);
+		*p++ = 0x0f;
+		*p++ = 0xb6;
 		*p++ = modrm(3, src, dst);
 		break;
 	case COMBINE(TYPE_INT64, TYPE_INT8 ):

@@ -15,7 +15,6 @@ void type_init(allocator *temps);
 void type_fini(void);
 
 typedef uint32_t type_info;
-extern const type_info tinfo_tbl[TYPE_NUM];
 
 #define TINFO_TYPE 5
 static_assert((1 << TINFO_TYPE) >= TYPE_NUM, "");

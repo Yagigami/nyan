@@ -42,6 +42,9 @@ case EXPR_INITLIST:
 	for (expr **init = scratch_start(e->call.args); init != scratch_end(e->call.args); init++)
 		resolve_expr(*init, list, up, final);
 	break;
+case EXPR_CONVERT:
+	resolve_expr(e->convert.operand, list, up, final);
+	break;
 case EXPR_NONE:
 	break;
 default:
@@ -55,9 +58,12 @@ static void resolve_simple_decl(decl_idx i, scope_stack_l *list, allocator *up, 
 	bool inserted;
 	map_entry *e = map_id(&list->scope->refs, d->name, intern_hash, intern_cmp, &inserted, up);
 	if (!expect_or(inserted,
-		d->pos, "the symbol ", d->name, " redefines",
-		scope2decl(e->v)->pos  , "in the same scope.\n")) return;
-	e->v = (val_t) d->type;
+		d->pos, "the symbol ", d->name, " redefines\n",
+		scope2decl(e->v)->pos  , "in the same scope.\n")) {
+		d->kind = DECL_NONE;
+		return;
+	}
+	e->v = (val_t) d;
 	switch (d->kind) {
 	case DECL_VAR:
 		resolve_expr(d->var_d.init, list, up, final);
@@ -132,9 +138,9 @@ static void resolve_func(decl_idx i, dyn_arr *add_subscopes, scope_stack_l *list
 		bool inserted;
 		map_entry *e = map_id(&new->refs, arg->name, intern_hash, intern_cmp, &inserted, up);
 		if (!expect_or(inserted,
-			f->pos, "the symbol ", arg->name, " redefines",
+			f->pos, "the symbol ", arg->name, " redefines\n",
 			scope2decl(e->v)->pos, "in the same scope.\n")) continue;
-		e->v = (val_t) arg->type;
+		e->v = (val_t) arg;
 	}
 
 	dyn_arr subs; dyn_arr_init(&subs, 0, up);
@@ -160,7 +166,7 @@ void resolve_refs(module_t of, scope *to, allocator *up, allocator *final)
 		if (!expect_or(inserted,
 					d->pos, "the symbol ", d->name, " is redeclared here.\n",
 					scope2decl(e->v)->pos, "it was previously declared here.\n")) continue;
-		e->v = (val_t) d->type;
+		e->v = (val_t) d;
 	}
 	for (decl_idx *it = start; it != end; it++) {
 		decl *d = idx2decl(*it);
@@ -181,5 +187,5 @@ void scope_fini(scope *s, allocator *a)
 	map_fini(&s->refs, a);
 }
 
-decl *scope2decl(val_t v) { return idx2decl(v); }
+decl *scope2decl(val_t v) { return (decl*) v; }
 
