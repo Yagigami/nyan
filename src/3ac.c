@@ -97,19 +97,20 @@ static ident_t ir3_expr(ir3_func *f, expr *e, map *e2t, map_stack *stk, ssa_ref 
 	map_entry *asso = map_find(e2t, (key_t) e, intern_hash((key_t) e), intern_cmp); assert(asso);
 	type *t = (type*) asso->v;
 	type_info tinfo = t->tinf;
-	switch (e->kind) {
 	ssa_ref number;
+	switch (e->kind) {
 case EXPR_INT:
 	number = new_local(&f->locals, tinfo);
 	assert(e->value <= (ssa_extension)-1);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_IMM, number }, sizeof(ssa_instr), a);
 	// just little endian things // btw this is undefined behavior
 	dyn_arr_push(&f->ins, &e->value, sizeof(ssa_extension), a);
-	return number;
+	break;
+
 case EXPR_BOOL:
 	number = new_local(&f->locals, tinfo);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_BOOL, number, e->name == tokens.kw_true }, sizeof(ssa_instr), a);
-	return number;
+	break;
 	
 case EXPR_NAME:
 	{
@@ -129,7 +130,8 @@ case EXPR_NAME:
 	if (rvalue != REF_NONE)
 		assert(it->next),
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_COPY, ent->v, rvalue }, sizeof(ssa_instr), a);
-	return ent->v;
+	number = ent->v;
+	break;
 	}
 
 case EXPR_CALL:
@@ -166,7 +168,7 @@ case EXPR_CALL:
 		dyn_arr_push(&bytecode.relocs, &(ir3_reloc){ .sym_in=bytecode.cur_idx, .offset_in=(void*) &call[1] - f->ins.buf.addr, .ref=~func }, sizeof(ir3_reloc), a);
 	}
 	DEALLOC(a, m);
-	return number;
+	break;
 	}
 
 case EXPR_ADD:
@@ -179,7 +181,7 @@ case EXPR_ADD:
 				op == '-' ? SSA_SUB:
 				(assert(0), -1);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=opc, number, L, R }, sizeof(ssa_instr), a);
-	return number;
+	break;
 	}
 
 case EXPR_CMP:
@@ -197,7 +199,7 @@ case EXPR_CMP:
 	// probably just give me bugs.
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_SET, number, L, R }, sizeof(ssa_instr), a);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .to=cc }, sizeof(ssa_instr), a);
-	return number;
+	break;
 	}
 
 case EXPR_LOG_NOT:
@@ -205,7 +207,7 @@ case EXPR_LOG_NOT:
 	ssa_ref inner = ir3_expr(f, e->unary.operand, e2t, stk, REF_NONE, a);
 	number = new_local(&f->locals, tinfo);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_BOOL_NEG, number, inner }, sizeof(ssa_instr), a);
-	return number;
+	break;
 	}
 
 case EXPR_ADDRESS:
@@ -216,18 +218,32 @@ case EXPR_ADDRESS:
 		ssa_ref name = ir3_expr(f, sub, e2t, stk, REF_NONE, a);
 		number = new_local(&f->locals, tinfo);
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ADDRESS, number, name }, sizeof(ssa_instr), a);
-		return number;
 	} else if (sub->kind == EXPR_INDEX) {
 		ssa_ref index = ir3_expr(f, sub->binary.R, e2t, stk, REF_NONE, a);
 		ssa_ref base = ir3_expr(f, sub->binary.L, e2t, stk, REF_NONE, a);
-		type_info *base_tinfo = f->locals.buf.addr + base * sizeof *base_tinfo;
+		type_info base_tinfo = t->base->tinf;
 		number = new_local(&f->locals, tinfo);
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_IMM, number }, sizeof(ssa_instr), a);
-		dyn_arr_push(&f->ins, &(ssa_instr){ .v=TINFO_GET_SIZE(*base_tinfo) }, sizeof(ssa_instr), a);
+		dyn_arr_push(&f->ins, &(ssa_instr){ .v=TINFO_GET_SIZE(base_tinfo) }, sizeof(ssa_instr), a);
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_MUL, number, number, index }, sizeof(ssa_instr), a);
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ADD, number, number, base }, sizeof(ssa_instr), a);
-		return number;
+	} else if (sub->kind == EXPR_DEREF) {
+		number = ir3_expr(f, sub->unary.operand, e2t, stk, REF_NONE, a);
 	} else __builtin_unreachable();
+	break;
+	}
+
+case EXPR_DEREF:
+	{
+	ssa_ref addr = ir3_expr(f, e->unary.operand, e2t, stk, REF_NONE, a);
+	if (rvalue == REF_NONE) {
+		number = new_local(&f->locals, tinfo);
+		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_LOAD, number, addr }, sizeof(ssa_instr), a);
+	} else {
+		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_STORE, rvalue, addr }, sizeof(ssa_instr), a);
+		number = rvalue; // maybe set this to REF_NONE, it should not get read, regardless
+	}
+	break;
 	}
 
 case EXPR_INDEX:
@@ -242,17 +258,17 @@ case EXPR_INDEX:
 	if (rvalue == REF_NONE) {
 		number = new_local(&f->locals, tinfo);
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_LOAD, number, addr }, sizeof(ssa_instr), a);
-		return number;
 	} else {
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_STORE, rvalue, addr }, sizeof(ssa_instr), a);
-		return rvalue;
+		number = rvalue;
 	}
+	break;
 	}
 
 case EXPR_INITLIST:
 	{
 	ir3_sym blob = { .m=ALLOC(a, TINFO_GET_SIZE(tinfo), 8), .align=TINFO_GET_ALIGN(tinfo), .kind=IR3_BLOB };
-	idx_t ref = dyn_arr_size(&bytecode.blob) / sizeof blob;
+	idx_t ref = dyn_arr_size(&bytecode.blob) / sizeof(ir3_sym);
 	dyn_arr_push(&bytecode.blob, &blob, sizeof blob, a);
 	serialize_initlist(blob.m.addr, e, t, e2t, stk);
 	char buf[16];
@@ -260,27 +276,28 @@ case EXPR_INITLIST:
 	assert(buf[len] == '\0');
 	map_entry name = global_name((ident_t) buf, len, a);
 	dyn_arr_push(&bytecode.names, &name, sizeof name, a);
-	// FIXME: use ANYPTR somehow
-	ssa_ref local = new_local(&f->locals, TINFO_INT64);
+	ssa_ref local = new_local(&f->locals, TINFO_PTR);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_GLOBAL_REF, local }, sizeof(ssa_instr), a);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .v=ref }, sizeof(ssa_extension), a);
-	ssa_ref target = new_local(&f->locals, tinfo);
-	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_MEMCOPY, target, local }, sizeof(ssa_instr), a);
-	return target;
+	number = new_local(&f->locals, tinfo);
+	// FIXME: also take the address of target, and remove the `lea` in codegen
+	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_MEMCOPY, number, local }, sizeof(ssa_instr), a);
+	break;
 	}
 
 case EXPR_CONVERT:
 	{
 	assert(rvalue == REF_NONE);
 	ssa_ref from = ir3_expr(f, e->convert.operand, e2t, stk, rvalue, a);
-	ssa_ref number = new_local(&f->locals, e->convert.type->tinf);
+	number = new_local(&f->locals, e->convert.type->tinf);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_COPY, .to=number, .L=from }, sizeof(ssa_instr), a);
-	return number;
+	break;
 	}
 
 default:
 	__builtin_unreachable();
 	}
+	return number;
 }
 
 static void ir3_decl(ir3_func *f, decl_idx i, map *e2t, map_stack *stk, allocator *a)
@@ -493,14 +510,15 @@ ir3_module convert_to_3ac(module_t ast, scope *enclosing, map *e2t, allocator *a
 		assert(d->kind == DECL_FUNC);
 		map_entry *e = map_add(&bottom.ast2num, d->name, intern_hash, a);
 		e->k = d->name;
-		bytecode.cur_idx = e->v = dyn_arr_size(&bytecode.names) / sizeof(map_entry);
+		e->v = bytecode.cur_idx = dyn_arr_size(&bytecode.blob) / sizeof(ir3_sym);
 		map_entry global = global_name(d->name, ident_len(d->name), a);
+		dyn_arr_push(&bytecode.names, &global, sizeof global, a);
 		ir3_sym sym;
 		sym.kind = IR3_FUNC;
+		ptrdiff_t offset = dyn_arr_push(&bytecode.blob, &sym, sizeof sym, bytecode.temps) - bytecode.blob.buf.addr;
 		ir3_decl_func(&sym.f, d, e2t, &bottom, &fsc, a);
-		dyn_arr_push(&bytecode.names, &global, sizeof global, a);
+		memcpy(bytecode.blob.buf.addr + offset, &sym.f, sizeof sym.f);
 		// TODO: mmap trickery to reduce the need to copy potentially large amounts of data
-		dyn_arr_push(&bytecode.blob, &sym, sizeof sym, bytecode.temps);
 	}
 	ir3_module out = scratch_from(&bytecode.blob, bytecode.temps, a);
 	patch_relocs(out, &bottom.ast2num);
@@ -645,6 +663,7 @@ void test_3ac(void)
 int dump_3ac(ir3_module m, map_entry *globals)
 {
 	int printed = 0;
+	assert(scratch_len(m) / sizeof(ir3_sym) == dyn_arr_size(&bytecode.names) / sizeof(map_entry));
 	for (ir3_sym *start = scratch_start(m), *end = scratch_end(m),
 			*f = start; f != end; f++, globals++) {
 		printed += print(stdout, "sym.", (print_int){ f-start }, " ", (char*) globals->k);

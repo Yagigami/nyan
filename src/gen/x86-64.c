@@ -19,30 +19,28 @@ enum prefix {
 };
 
 static byte modrm(int mod, int rm, int reg) { return mod << 6 | (reg & 7) << 3 | (rm & 7); }
-static byte sib(int ss, int index, int base) { return ss << 6 | (index & 7) << 3 | (base & 7) << 3; }
+static byte sib(int ss, int index, int base) { return ss << 6 | (index & 7) << 3 | (base & 7); }
 static byte rex(int w, int r, int x, int b) { return REX | w<<3 | r<<2 | x<<1 | b<<0; }
 
-static byte *imm8(byte *p, uint8_t i)
+static byte *emit_imm(byte *p, uint64_t i, int bytes)
 {
-	*p++ = i;
+	for (; bytes--; i >>= 8)
+		*p++ = i & 0xff;
 	return p;
 }
 
-static byte *imm16(byte *p, uint16_t i) { return imm8(imm8(p, i & 0xff), i >> 8); }
-static byte *imm32(byte *p, uint32_t i) { return imm16(imm16(p, i & 0xffff), i >> 16); }
-// static byte *imm64(byte *p, uint64_t i) { return imm32(imm32(p, i & 0xffffffff), i >> 32); }
-
 static byte *emit_disp(byte *p, enum x86_64_reg r, enum x86_64_reg base, idx_t offset)
 {
+	assert(base != RSP);
 	if (offset == 0x0 && (base & 0x7) != RBP) {
 		*p++ = modrm(0, base, r);
 		return p;
 	} else if (-0x80 <= offset && offset < 0x80) {
 		*p++ = modrm(1, base, r);
-		return imm8(p, offset);
+		return emit_imm(p, offset, 1);
 	} else {
 		*p++ = modrm(2, base, r);
-		return imm32(p, offset);
+		return emit_imm(p, offset, 4);
 	}
 }
 
@@ -121,11 +119,11 @@ static byte *addsubimm(byte *p, enum x86_64_reg r, idx_t imm, enum ssa_opcode op
 	if (-0x80 <= imm && imm < 0x80) {
 		*p++ = opcode_anysize(0x83, bytes);
 		*p++ = modrm(3, r, opcode_ext);
-		return imm8(p, imm);
+		return emit_imm(p, imm, 1);
 	} else {
 		*p++ = opcode_anysize(0x81, bytes);
 		*p++ = modrm(3, r, opcode_ext);
-		return imm32(p, imm);
+		return emit_imm(p, imm, 4);
 	}
 }
 
@@ -152,19 +150,20 @@ static byte *mov(byte *p, enum x86_64_reg L, enum x86_64_reg R, int bytes)
 }
 
 // little endian, just lazy to write 4 imm8 calls
-static byte *endbr64(byte *p) { return imm32(p, 0xfa1e0ff3); }
+static byte *endbr64(byte *p) { return emit_imm(p, 0xfa1e0ff3, 4); }
 
-static byte *mov_imm32(byte *p, enum x86_64_reg r, idx_t imm)
+static byte *mov_imm(byte *p, enum x86_64_reg r, int64_t imm, int bytes)
 {
-	if (r >= R8) *p++ = REX_B;
-	*p++ = 0xb8 + (r & 7);
-	return imm32(p, imm);
+	if (bytes == 8 && -0xffffffff-1 <= imm && imm <= 0xffffffff) bytes = 4;
+	p = prefix_ifreq(p, bytes, 0, 0, r);
+	*p++ = (bytes == 1? 0xb0: 0xb8) | (r & 7);
+	return emit_imm(p, imm, bytes);
 }
 
 static byte *store_rbprel_imm8(byte *p, idx_t offset, idx_t imm)
 {
 	*p++ = 0xc6;
-	return imm8(emit_disp(p, 0, RBP, offset), imm);
+	return emit_imm(emit_disp(p, 0, RBP, offset), imm, 1);
 }
 
 // 2AC EQ/NE/LT/LE/GT/GE
@@ -238,14 +237,19 @@ static byte *lea(byte *p, enum x86_64_reg res, enum x86_64_reg base, idx_t disp3
 	return emit_disp(p, res, base, disp32);
 }
 
+static byte *emit_rip_disp(byte *p, enum x86_64_reg r, idx_t disp32)
+{
+	*p++ = modrm(0, RBP, r);
+	return emit_imm(p, disp32, 4);
+}
+
 static byte *lea_rip(byte *p, enum x86_64_reg res, idx_t disp32, int bytes)
 {
 	assert(bytes == 2 || bytes == 4 || bytes == 8);
 	p = override_if16b(p, bytes);
 	if (bytes == 8 || res >= R8) *p++ = rex(bytes==8, res>>3, 0, 0);
 	*p++ = 0x8d;
-	*p++ = modrm(0, RBP, res);
-	return imm32(p, disp32);
+	return emit_rip_disp(p, res, disp32);
 }
 
 // for now, the conversion is done on whatever is in the A register
@@ -333,7 +337,7 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 			case SSA_GOTO:
 				*p++ = 0xe9;
 				dyn_arr_push(&label_relocs, &(gen_reloc){ .offset=dyn_arr_size(&ins) + 1, .symref=i->to }, sizeof(gen_reloc), a);
-				p = imm32(p, 0);
+				p = emit_imm(p, 0, 4);
 				break;
 
 			case SSA_SET:
@@ -356,7 +360,7 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 				idx_t offset = dyn_arr_size(&ins) + p - buf;
 				dyn_arr_push(&label_relocs, &(gen_reloc){ offset, i[1].L }, sizeof(gen_reloc), a);
 				}
-				p = imm32(p, 0);
+				p = emit_imm(p, 0, 4);
 				i++;
 				break;
 
@@ -386,7 +390,7 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 
 			case SSA_IMM:
 				width = TINFO_GET_SIZE(tinfo[i->to]);
-				p = mov_imm32(p, RAX, i[1].v);
+				p = mov_imm(p, RAX, i[1].v, width);
 				p = store_rbprel(p, RAX, locals[i->to], width);
 				i++; // because of the extension
 				break;
@@ -410,9 +414,9 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 			case SSA_MEMCOPY:
 				width = TINFO_GET_SIZE(tinfo[i->to]);
 				// slow and dirty repne movsb
-				p = load_rbprel(p, RDI, locals[i->to], 8); // assuming pointers are 8-bytes
-				p = load_rbprel(p, RSI, locals[i->L ], 8);
-				p = mov_imm32(p, RCX, width);
+				p = lea(p, RDI, RBP, locals[i->to], 8); // assuming pointers are 8-bytes
+				p = load_rbprel(p, RSI, locals[i->L], 8);
+				p = mov_imm(p, RCX, width, 8);
 				*p++ = 0xf2;
 				*p++ = 0xa4;
 				break;
@@ -454,7 +458,7 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 				idx_t offset = dyn_arr_size(&ins) + p - buf;
 				gen_reloc r = { offset, i[1].v };
 				dyn_arr_push(&refs, &r, sizeof r, a);
-				p = imm32(p, 0);
+				p = emit_imm(p, 0, 4);
 				p = store_rbprel(p, RAX, locals[i->to], TINFO_GET_SIZE(tinfo[i->to]));
 				i += num_ext;
 				}

@@ -22,7 +22,9 @@ static bool same_type(const type *L, const type *R)
 	if (L->kind == TYPE_NONE || R->kind == TYPE_NONE) return true; // already got an error earlier, dont need more
 	if (L->kind != R->kind) return false;
 	switch (L->kind) {
+	case TYPE_INT64:
 	case TYPE_INT32:
+	case TYPE_INT8:
 	case TYPE_BOOL:
 		return true;
 	case TYPE_FUNC:
@@ -32,10 +34,11 @@ static bool same_type(const type *L, const type *R)
 		}
 	case TYPE_ARRAY:
 		return same_type(L->base, R->base) && L->checked_count == R->checked_count;
+	case TYPE_PTR:
+		return same_type(L->base, R->base);
 	default:
-		return false;
+		__builtin_unreachable();
 	}
-	__builtin_unreachable();
 }
 
 static const size_t limits[TYPE_INT64-TYPE_INT8+1] = {
@@ -104,6 +107,10 @@ static void complete_type(type *t, scope_stack_l *stk, map *e2t, allocator *up)
 		t->checked_count = t->unchecked_count->value;
 		base = t->base->tinf;
 		t->tinf = TINFO(t->checked_count * TINFO_GET_SIZE(base), TINFO_GET_L2ALIGN(base), TYPE_ARRAY);
+		break;
+	case TYPE_PTR:
+		complete_type(t->base, stk, e2t, up);
+		t->tinf = TINFO_PTR;
 		break;
 	default:
 		__builtin_unreachable();
@@ -189,25 +196,6 @@ case EXPR_CMP:
 	break;
 	}
 
-case EXPR_INDEX:
-	// LVALUE is ok
-	{
-	if (!expect_or(!eval, e->pos, "cannot evaluate an indexing operation in a constant expression.\n")) break;
-	type *base  = type_check_expr(e->binary.L, stk, &type_none, RVALUE, e2t, up, eval);
-	e->binary.L = decay_expr(base, e->binary.L, &base, e2t, up);
-	if (!expect_or(base->kind == TYPE_PTR,
-			e->pos, "attempt to index something that does not support indexing.\n")) break;
-	type *index = type_check_expr(e->binary.R, stk, &type_int64, RVALUE, e2t, up, eval);
-	if (TINFO_GET_SIZE(index->tinf) < TINFO_GET_SIZE(TINFO_INT64)) {
-		e->binary.R = expr_convert(up, e->binary.R, &type_int64);
-		map_entry *asso = map_add(e2t, (key_t) e->binary.R, intern_hash, types.temps);
-		asso->k = (key_t) e->binary.R;
-		asso->v = (val_t) &type_int64;
-	}
-	t = base->base;
-	break;
-	}
-
 case EXPR_INITLIST:
 	{
 	if (!expect_or(c == RVALUE,
@@ -251,8 +239,15 @@ case EXPR_CALL:
 	if (!expect_or(scratch_len(e->call.args) / sizeof(expr*) == scratch_len(params) / sizeof(func_arg),
 			e->pos, "function call with the wrong number of arguments provided.\n"))
 		break;
-	for (func_arg *param = scratch_start(params); param != scratch_end(params); param++, arg++)
-		type_check_expr(*arg, stk, param->type, RVALUE, e2t, up, eval);
+	for (func_arg *param = scratch_start(params); param != scratch_end(params); param++, arg++) {
+		type *t = type_check_expr(*arg, stk, param->type, RVALUE, e2t, up, eval);
+		if (t->tinf != param->type->tinf) {
+			*arg = expr_convert(up, *arg, param->type);
+			map_entry *asso = map_add(e2t, (key_t) *arg, intern_hash, types.temps);
+			asso->k = (key_t) *arg;
+			asso->v = (val_t) param->type;
+		}
+	}
 	t = operand->base;
 	break;
 	}
@@ -277,6 +272,46 @@ case EXPR_CONVERT:
 			e->kind = EXPR_INT;
 		}
 	}
+	break;
+	}
+
+case EXPR_ADDRESS:
+	if (!expect_or(c == RVALUE, e->pos, "cannot take the result of an address-of operation as an lvalue.\n")) break;
+	assert(!eval);
+	if (expecting->kind == TYPE_PTR) {
+		type_check_expr(e->unary.operand, stk, expecting->base, LVALUE, e2t, up, false);
+		t = expecting;
+	} else {
+		type *operand = type_check_expr(e->unary.operand, stk, &type_none, LVALUE, e2t, up, false);
+		t = type_ptr(up, operand);
+	}
+	break;
+
+case EXPR_INDEX:
+	// LVALUE is ok
+	{
+	if (!expect_or(!eval, e->pos, "cannot evaluate an indexing operation in a constant expression.\n")) break;
+	type *base  = type_check_expr(e->binary.L, stk, &type_none, RVALUE, e2t, up, eval);
+	e->binary.L = decay_expr(base, e->binary.L, &base, e2t, up);
+	if (!expect_or(base->kind == TYPE_PTR,
+			e->pos, "attempt to index something that does not support indexing.\n")) break;
+	type *index = type_check_expr(e->binary.R, stk, &type_int64, RVALUE, e2t, up, eval);
+	if (TINFO_GET_SIZE(index->tinf) < TINFO_GET_SIZE(TINFO_INT64)) {
+		e->binary.R = expr_convert(up, e->binary.R, &type_int64);
+		map_entry *asso = map_add(e2t, (key_t) e->binary.R, intern_hash, types.temps);
+		asso->k = (key_t) e->binary.R;
+		asso->v = (val_t) &type_int64;
+	}
+	t = base->base;
+	break;
+	}
+
+case EXPR_DEREF:
+	{
+	assert(!eval);
+	type *operand = type_check_expr(e->unary.operand, stk, &type_none, RVALUE, e2t, up, false);
+	if (!expect_or(operand->kind == TYPE_PTR, e->pos, "cannot dereference a non-pointer.\n")) break;
+	t = operand->base;
 	break;
 	}
 

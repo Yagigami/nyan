@@ -11,7 +11,6 @@
 typedef struct dyn_arr {
 	allocation buf; // assumed to represent `void *buf.addr[buf.size/sizeof(T)];`
 	void *end;
-	allocator *a;
 } dyn_arr;
 
 void dyn_arr_init(dyn_arr *v, size_t cap, allocator *a);

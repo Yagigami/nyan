@@ -177,7 +177,7 @@ int _print_impl(FILE *to, uint64_t bitmap, ...)
 		printed += fprint_ir3_func(to, va_arg(args, const ir3_func*));
 		break;
 	case P_INT:
-		printed += fprintf(to, "%tx", va_arg(args, print_int).v);
+		printed += fprintf(to, "%02tx", va_arg(args, print_int).v);
 		break;
 	default:
 		__builtin_unreachable();

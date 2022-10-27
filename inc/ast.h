@@ -63,6 +63,7 @@ typedef enum expr_kind {
 	EXPR_LOG_NOT,
 	EXPR_INITLIST,
 	EXPR_ADDRESS,
+	EXPR_DEREF,
 	EXPR_INDEX,
 	EXPR_CONVERT,
 } expr_kind;
@@ -161,6 +162,7 @@ module_t parse_module(allocator *up);
 decl *idx2decl(decl_idx i);
 
 expr *expr_convert(allocator *a, expr *e, type *to);
+type *type_ptr(allocator *a, type *base);
 
 #define AST_DUP(a,v) ast_dup((a),&(v),sizeof (v))
 

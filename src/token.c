@@ -17,19 +17,21 @@ struct global_token_state tokens;
 
 // assuming 0-init for the fields not mentioned
 static const enum {
-	PREC_POSTFIX,
-	PREC_PREFIX,
-	PREC_MULTIPLY,
-	PREC_SHIFT,
-	PREC_BIT_AND,
-	PREC_BIT_OR,
-	PREC_ADD,
-	PREC_CMP,
-	PREC_LOG_AND,
-	PREC_LOG_OR,
-	PREC_CAST,
+	PREC_POSTFIX	= 1 << 0,
+	PREC_PREFIX	= 1 << 1,
+	PREC_MULTIPLY	= 1 << 2,
+	PREC_SHIFT	= 1 << 3,
+	PREC_BIT_AND	= 1 << 4,
+	PREC_BIT_OR	= 1 << 5,
+	PREC_ADD	= 1 << 6,
+	PREC_CMP	= 1 << 7,
+	PREC_LOG_AND	= 1 << 8,
+	PREC_LOG_OR	= 1 << 9,
+	PREC_CAST	= 1 << 10,
 } token_precedence[TOKEN_NUM] = {
 	['!'] = PREC_PREFIX,
+	['&'] = PREC_PREFIX,
+	['*'] = PREC_PREFIX,
 
 	['+'] = PREC_ADD, ['-'] = PREC_ADD,
 
@@ -126,8 +128,7 @@ again:
 	CASE2('>', '=', TOKEN_GEQ);
 	CASE2('!', '=', TOKEN_NEQ);
 	#undef CASE2
-	case '&':
-	case '+': case '-': // support += later
+	case '*': case '&': case '+': case '-': // support += later
 	case '[': case ']': case ',': case ';': case ':': case '(': case ')': case '{': case '}': // always just 1 token
 		break;
 	case 'A' ... 'Z': case 'a' ... 'z': case '_':
@@ -298,7 +299,7 @@ bool lookahead_is_kw(ident_t kw)
 bool token_match_precedence(token_kind p)
 {
 	assert(0 <= p && p < sizeof token_precedence/sizeof *token_precedence);
-	bool r = token_precedence[tokens.current.kind] == token_precedence[p]; // or expose the enum
+	bool r = token_precedence[tokens.current.kind] & token_precedence[p];
 	if (r) token_advance();
 	return r;
 }

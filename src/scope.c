@@ -36,6 +36,8 @@ case EXPR_INDEX:
 	resolve_expr(e->binary.R, list, up, final);
 	break;
 case EXPR_LOG_NOT:
+case EXPR_ADDRESS:
+case EXPR_DEREF:
 	resolve_expr(e->unary.operand, list, up, final);
 	break;
 case EXPR_INITLIST:

@@ -83,6 +83,23 @@ expr *expr_convert(allocator *a, expr *e, type *to)
 	return cvt;
 }
 
+static type *new_type(allocator *up)
+{
+	type *t = ALLOC(up, sizeof *t, alignof *t).addr;
+	t->kind = TYPE_NONE;
+	t->tinf = -1;
+	return t;
+}
+
+type *type_ptr(allocator *up, type *base)
+{
+	type *t = new_type(up);
+	t->kind = TYPE_PTR;
+	t->base = base;
+	t->tinf = TINFO_PTR;
+	return t;
+}
+
 expr *parse_expr_atom(allocator *up)
 {
 	if (token_match('(')) {
@@ -144,10 +161,15 @@ expr *parse_expr_prefix(allocator *up)
 	token snapshot = tokens.current;
 	if (token_match_precedence('!')) {
 		expr *pre = new_expr(up);
-		pre->kind = EXPR_LOG_NOT;
+		switch (snapshot.kind) {
+		case '!': pre->kind = EXPR_LOG_NOT; break;
+		case '&': pre->kind = EXPR_ADDRESS; break;
+		case '*': pre->kind = EXPR_DEREF;   break;
+		default: __builtin_unreachable();
+		}
 		pre->unary.op = snapshot.kind;
-		pre->unary.operand = parse_expr_prefix(up);
 		pre->pos = snapshot.pos;
+		pre->unary.operand = parse_expr_prefix(up);
 		return pre;
 	} else return parse_expr_postfix(up);
 }
@@ -247,8 +269,7 @@ void parse_type_params(dyn_arr *p, allocator *up)
 
 type *parse_type_prim(allocator *up)
 {
-	type *prim = ALLOC(up, sizeof *prim, 8).addr;
-	prim->tinf = -1;
+	type *prim = new_type(up);
 	if (token_match_kw(tokens.kw_func)) {
 		prim->kind = TYPE_FUNC;
 	} else if (token_match_kw(tokens.kw_int8)) {
@@ -269,15 +290,19 @@ type *parse_type_prim(allocator *up)
 
 type *parse_typearget(type *base, allocator *up)
 {
-	while (token_match('[')) {
-		type *tgt = ALLOC(up, sizeof *tgt, alignof *tgt).addr;
-		tgt->tinf = -1;
+	while (true) if (token_match('[')) {
+		type *tgt = new_type(up);
 		tgt->kind = TYPE_ARRAY;
 		tgt->base = base;
 		tgt->unchecked_count = parse_expr(up);
 		if (!token_expect(']')) goto err;
 		base = tgt;
-	}
+	} else if (token_match('*')) {
+		type *tgt = new_type(up);
+		tgt->kind = TYPE_PTR;
+		tgt->base = base;
+		base = tgt;
+	} else break;
 err:
 	return base;
 }
@@ -334,8 +359,11 @@ stmt *parse_stmt(allocator *up)
 		s->ifelse.cond = parse_expr(up);
 		token_expect(')');
 		s->ifelse.s_then = parse_stmt(up);
-	} else if (token_is(TOKEN_NAME)) {
-		if (lookahead_is(':')) {
+	} else if (token_is('{')) {
+		s->kind = STMT_BLOCK;
+		s->blk = parse_stmt_block(up);
+	} else {
+		if (token_is(TOKEN_NAME) && lookahead_is(':')) {
 			s->kind = STMT_DECL;
 			s->d = parse_decl(up);
 		} else {
@@ -348,14 +376,10 @@ stmt *parse_stmt(allocator *up)
 			}
 			if (!token_expect(';')) goto err;
 		}
-	} else if (token_is('{')) {
-		s->kind = STMT_BLOCK;
-		s->blk = parse_stmt_block(up);
-	} else {
-		token_unexpected();
-	err:
-		s->kind = STMT_NONE;
 	}
+	return s;
+err:
+	s->kind = STMT_NONE;
 	return s;
 }
 

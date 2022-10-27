@@ -17,7 +17,7 @@ funcparams : (a1: T1, a2: T2, ...)
 
 OPS:
 	postfix		-> x[i], x(a), x.f
-	prefix		-> @x, +x, -x, &x, ~x, !x
+	prefix		-> *x, +x, -x, &x, ~x, !x
 	in-multiply	-> x*y, x/y, x%y, x*%y
 	in-shift	-> x>>y, x<<y
 	in-bit-and	-> x&y
