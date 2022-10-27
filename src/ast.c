@@ -109,7 +109,9 @@ expr *parse_expr_atom(allocator *up)
 	expr *atom = new_expr(up);
 	token snapshot = tokens.current;
 	atom->pos = snapshot.pos;
-	if (token_match(TOKEN_NAME)) {
+	if (token_match_kw(tokens.kw_undef)) {
+		atom->kind = EXPR_UNDEF;
+	} else if (token_match(TOKEN_NAME)) {
 		atom->kind = EXPR_NAME;
 		atom->name = snapshot.processed;
 	} else if (token_match(TOKEN_INT)) {

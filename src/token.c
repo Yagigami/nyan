@@ -62,27 +62,15 @@ int token_init(const char *path, allocator *up, allocator *names)
 		dyn_arr_init(&tokens.line_marks, 2*sizeof(source_idx), up);
 		source_idx first_line = 0;
 		dyn_arr_push(&tokens.line_marks, &first_line, sizeof first_line, up);
-		#define INSERT(NAME,STR) do {\
-			map_entry *e = map_add(&tokens.idents, (key_t) STR, string_hash, tokens.up); \
-			allocation m = ALLOC(tokens.names, sizeof(STR), 1); \
-			memcpy(m.addr, STR, sizeof(STR)); \
-			tokens.NAME = e->k = (key_t) m.addr; \
-			e->v = sizeof(STR)-1; \
-			} while (0)
-		#define KW(name) INSERT(kw_##name, #name)
-		KW(func);
-		KW(int8);
-		KW(int32);
-		KW(int64);
-		KW(bool);
-		KW(false);
-		KW(true);
-		KW(if);
-		KW(else);
-		KW(while);
-		KW(return);
+		#define KW(kw) do {\
+			map_entry *e = map_add(&tokens.idents, (key_t) #kw, string_hash, tokens.up); \
+			allocation m = ALLOC(tokens.names, sizeof(#kw), 1); \
+			memcpy(m.addr, #kw, sizeof(#kw)); \
+			tokens.kw_##kw = e->k = (key_t) m.addr; \
+			e->v = sizeof(#kw)-1; \
+			} while (0);
+		FORALL_KEYWORDS
 		#undef KW
-		#undef INSERT
 
 		// arena grows down
 		tokens.keywords_begin = ident_str(tokens.kw_return);
@@ -241,7 +229,7 @@ size_t intern_hash(key_t k)
 	return h;
 }
 
-static int _string_cmp(key_t L, key_t R)
+static key_t _string_cmp(key_t L, key_t R)
 {
 	const char *lc=ident_str(L), *rc=ident_str(R);
 	for (; isident(*lc) && isident(*rc); lc++, rc++) {

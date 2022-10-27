@@ -47,6 +47,21 @@ typedef struct token {
 	token_kind kind;
 } token;
 
+#define FORALL_KEYWORDS \
+	KW(func)	\
+	KW(int8)	\
+	KW(int32)	\
+	KW(int64)	\
+	KW(bool)	\
+	KW(false)	\
+	KW(true)	\
+	KW(undef)	\
+	KW(if)		\
+	KW(else)	\
+	KW(while)	\
+	KW(return)	\
+
+
 // a compiler is called on 1 file. globals are fine
 extern struct global_token_state {
 	token current;
@@ -58,17 +73,9 @@ extern struct global_token_state {
 	allocator *up; // allows the token_* functions not to take an allocator parameter just for line_marks and idents
 	allocator *names;
 	dyn_arr line_marks; // array of source_idx
-	ident_t kw_func,
-		kw_int8,
-	        kw_int32,
-		kw_int64,
-		kw_bool,
-		kw_false,
-		kw_true,
-		kw_if,
-		kw_else,
-		kw_while,
-		kw_return;
+	#define KW(kw) ident_t kw_##kw;
+	FORALL_KEYWORDS
+	#undef KW
 	const char *keywords_begin, *keywords_end;
 } tokens;
 
@@ -97,7 +104,8 @@ void token_skip_to_newline(void);
 
 size_t string_hash(key_t k);
 size_t intern_hash(key_t k);
-static inline int intern_cmp(key_t L, key_t R) { return L - R; }
+// fuck u ubsan
+static inline key_t intern_cmp(key_t L, key_t R) { return L - R; }
 
 source_idx token_pos(void);
 const char *token_source(source_idx pos);

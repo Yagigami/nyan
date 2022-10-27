@@ -105,7 +105,7 @@ map_entry *map_add(map *map, key_t k, map_hash hash, allocator *a)
 }
 
 static size_t test_hash(key_t e);
-static int test_cmp(key_t L, key_t R);
+static key_t test_cmp(key_t L, key_t R);
 static key_t test_insert(key_t k);
 
 void test_map(void)
@@ -154,7 +154,7 @@ size_t test_hash(key_t k)
 	return h;
 }
 
-int test_cmp(key_t L, key_t R)
+key_t test_cmp(key_t L, key_t R)
 {
 	const char *lc = (char*) L, *lr = (char*) R;
 	while (*lc && *lc == *lr) lc++, lr++;

@@ -56,6 +56,7 @@ typedef enum expr_kind {
 	EXPR_NONE,
 	EXPR_INT,
 	EXPR_BOOL,
+	EXPR_UNDEF,
 	EXPR_NAME,
 	EXPR_CALL,
 	EXPR_ADD,

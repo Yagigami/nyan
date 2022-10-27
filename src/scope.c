@@ -48,6 +48,7 @@ case EXPR_CONVERT:
 	resolve_expr(e->convert.operand, list, up, final);
 	break;
 case EXPR_NONE:
+case EXPR_UNDEF:
 	break;
 default:
 	assert(0);

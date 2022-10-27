@@ -289,10 +289,15 @@ case EXPR_CONVERT:
 	{
 	assert(rvalue == REF_NONE);
 	ssa_ref from = ir3_expr(f, e->convert.operand, e2t, stk, rvalue, a);
-	number = new_local(&f->locals, e->convert.type->tinf);
+	number = new_local(&f->locals, tinfo);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_COPY, .to=number, .L=from }, sizeof(ssa_instr), a);
 	break;
 	}
+
+case EXPR_UNDEF:
+	number = new_local(&f->locals, tinfo);
+	// no-op
+	break;
 
 default:
 	__builtin_unreachable();

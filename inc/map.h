@@ -25,7 +25,7 @@ void map_fini(map *map, allocator *a);
 void map_clear(map *map);
 
 typedef size_t (*map_hash)(key_t k);
-typedef int (*map_cmp)(key_t L, key_t R);
+typedef key_t (*map_cmp)(key_t L, key_t R);
 // or just check map->cnt ?
 map_entry *map_id(map *map, key_t k, map_hash hash, map_cmp cmp, bool *inserted, allocator *a);
 map_entry *map_find(map *map, key_t k, size_t h, map_cmp cmp);

@@ -14,7 +14,6 @@ static type type_int8  = { .kind=TYPE_INT8, .tinf=TINFO_INT8 };
 static type type_int32 = { .kind=TYPE_INT32, .tinf=TINFO_INT32 };
 static type type_int64 = { .kind=TYPE_INT64, .tinf=TINFO_INT64 };
 static type type_bool = { .kind=TYPE_BOOL, .tinf=TINFO_BOOL };
-static type type_missing = { .kind=TYPE_NONE, .tinf=TINFO_NONE };
 
 // TODO: use an intern map
 static bool same_type(const type *L, const type *R)
@@ -119,7 +118,7 @@ static void complete_type(type *t, scope_stack_l *stk, map *e2t, allocator *up)
 
 type *type_check_expr(expr *e, scope_stack_l *stk, type *expecting, value_category c, map *e2t, allocator *up, bool eval)
 {
-	type *t = &type_missing;
+	type *t = &type_none;
 	switch (e->kind) {
 case EXPR_INT:
 	if (!expect_or(c == RVALUE,
@@ -175,7 +174,7 @@ case EXPR_CMP:
 	if (!expect_or(compatible_type_strong(smaller, bigger, smaller_e),
 			e->pos, "the operands to this binary operation are incompatible.\n")) break;
 	t = 	e->kind == EXPR_ADD? bigger:
-		e->kind == EXPR_CMP? &type_bool: &type_missing;
+		e->kind == EXPR_CMP? &type_bool: &type_none;
 	if (!eval) break;
 	token_kind op = e->binary.op;
 	if (e->kind == EXPR_ADD) {
@@ -315,6 +314,10 @@ case EXPR_DEREF:
 	break;
 	}
 
+case EXPR_UNDEF:
+	expect_or(c == RVALUE, e->pos, "cannot assign to undef-expression.\n");
+	t = expecting;
+	break;
 case EXPR_NONE:
 	break;
 default:
