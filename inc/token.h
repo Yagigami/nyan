@@ -59,6 +59,7 @@ typedef struct token {
 	KW(if)		\
 	KW(else)	\
 	KW(while)	\
+	KW(struct)	\
 	KW(return)	\
 
 

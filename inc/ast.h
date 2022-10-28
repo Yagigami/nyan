@@ -27,6 +27,7 @@ typedef enum type_kind {
 	TYPE_CHAINED = TYPE_FUNC,
 	TYPE_PTR,
 	TYPE_ARRAY,
+	TYPE_STRUCT,
 	
 	TYPE_NUM
 } type_kind;
@@ -34,6 +35,7 @@ typedef enum type_kind {
 typedef enum decl_kind {
 	DECL_NONE,
 	DECL_VAR,
+	DECL_STRUCT,
 	DECL_FUNC,
 
 	DECL_END = DECL_FUNC
@@ -78,7 +80,7 @@ typedef uint32_t type_info;
 typedef struct type {
 	struct type *base;
 	union {
-		// func_arg array
+		// func_arg array // also used for  struct
 		scratch_arr params;
 		// FIXME: dirty and (wah wah) unsafe
 		// should get fixed when adding struct layouts
@@ -88,11 +90,14 @@ typedef struct type {
 	type_info tinf;
 } type;
 
+// FIXME: this is aliased with a `decl` in type_check.c
+// --> find a way to be more precise
 typedef struct func_arg {
 	ident_t name;
 	type *type;
 } func_arg;
 
+// TODO: embed a type* inside or something
 typedef struct expr {
 	union {
 		uint64_t value;
@@ -103,7 +108,7 @@ typedef struct expr {
 		} call;
 		struct {
 			struct expr *L, *R;
-			token_kind op;
+			token_kind op; // TODO: just give 1 kind per operator
 		} binary;
 		struct {
 			struct expr *operand;
@@ -123,6 +128,8 @@ typedef scratch_arr stmt_block; // array of stmt*
 typedef struct decl {
 	ident_t name;
 	type *type;
+	decl_kind kind;
+	source_idx pos;
 	union {
 		struct {
 			expr *init;
@@ -131,8 +138,6 @@ typedef struct decl {
 			stmt_block body;
 		} func_d;
 	};
-	decl_kind kind;
-	source_idx pos;
 } decl;
 
 typedef struct stmt {

@@ -1,3 +1,14 @@
+test func(p: int32[3][2]*): int32
+{
+	k: bool = (*p)[1][2] == 1;
+	return k: int32;
+}
+
+rando func(p: int64[4]*): int64*
+{
+	return &(*p)[2];
+}
+
 set func(p: int64*, v: int32): int32
 {
 	*p = v;
@@ -15,13 +26,15 @@ ptr func(): int8
 	c: int32 = *p;
 	arr: int64[4][2] = { { 1, 2, 3, 4 }, { 5, 6, 7, 8 } };
 	r: int64[4]* = &arr[1];
+	u: int64* = rando(r);
 	s: int64[4]** = &r;
 	t: int64* = &(**s)[2];
 	d: int32*[2][3] = undef;
 	d[1][0] = *q;
 	*d[1][0] = 9;
+	extra: int8 = *u - 7 :int8;
 	zero: int8 = set(t, *d[1][0]): int8;
-	return (*t: int8) + zero;
+	return (*t: int8) + zero + extra;
 }
 
 ndarr func(): int32

@@ -87,7 +87,7 @@ static expr *decay_expr(type *t, expr *e, type **new, map *e2t, allocator *up)
 
 static type *type_check_expr(expr *e, scope_stack_l *stk, type *expecting, value_category c, map *e2t, allocator *up, bool eval);
 
-static void complete_type(type *t, scope_stack_l *stk, map *e2t, allocator *up)
+void complete_type(type *t, scope_stack_l *stk, map *e2t, allocator *up)
 {
 	if (t->tinf != (type_info)-1) return;
 	switch (t->kind) {
@@ -98,7 +98,6 @@ static void complete_type(type *t, scope_stack_l *stk, map *e2t, allocator *up)
 	CASE(INT32);
 	CASE(INT64);
 	CASE(BOOL);
-	CASE(FUNC);
 #undef CASE
 	case TYPE_ARRAY:
 		type_check_expr(t->unchecked_count, stk, &type_int64, RVALUE, e2t, up, true);
@@ -111,6 +110,13 @@ static void complete_type(type *t, scope_stack_l *stk, map *e2t, allocator *up)
 		complete_type(t->base, stk, e2t, up);
 		t->tinf = TINFO_PTR;
 		break;
+	case TYPE_FUNC:
+		{
+		for (func_arg *param = scratch_start(t->params); param != scratch_end(t->params); param++)
+			complete_type(param->type, stk, e2t, up);
+		complete_type(t->base, stk, e2t, up);
+		break;
+		}
 	default:
 		__builtin_unreachable();
 	}
@@ -315,7 +321,8 @@ case EXPR_DEREF:
 	}
 
 case EXPR_UNDEF:
-	expect_or(c == RVALUE, e->pos, "cannot assign to undef-expression.\n");
+	if (!expect_or(c == RVALUE, e->pos, "cannot assign to undef-expression.\n")) break;
+	if (!expect_or(!eval, e->pos, "cannot evaluate undef-expression.\n")) break;
 	t = expecting;
 	break;
 case EXPR_NONE:
@@ -394,8 +401,6 @@ void type_check_decl(decl_idx i, scope *sc, scope_stack_l *stk, map *e2t, alloca
 		type_check_expr(d->var_d.init, stk, d->type, RVALUE, e2t, up, false);
 		break;
 	case DECL_FUNC:
-		assert(d->type->kind == TYPE_FUNC);
-		// not much to do with the parameters in here
 		type_check_stmt_block(d->func_d.body, d->type->base, sc, stk, e2t, up);
 		break;
 	case DECL_NONE:

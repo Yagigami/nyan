@@ -221,10 +221,12 @@ case EXPR_ADDRESS:
 	} else if (sub->kind == EXPR_INDEX) {
 		ssa_ref index = ir3_expr(f, sub->binary.R, e2t, stk, REF_NONE, a);
 		ssa_ref base = ir3_expr(f, sub->binary.L, e2t, stk, REF_NONE, a);
-		type_info base_tinfo = t->base->tinf;
+		type *base_t = (type*) map_find(e2t, (key_t) sub->binary.L, intern_hash((key_t) sub->binary.L), intern_cmp)->v;
+		assert(base_t->kind == TYPE_PTR);
+		type_info elem_t = base_t->base->tinf;
 		number = new_local(&f->locals, tinfo);
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_IMM, number }, sizeof(ssa_instr), a);
-		dyn_arr_push(&f->ins, &(ssa_instr){ .v=TINFO_GET_SIZE(base_tinfo) }, sizeof(ssa_instr), a);
+		dyn_arr_push(&f->ins, &(ssa_instr){ .v=TINFO_GET_SIZE(elem_t) }, sizeof(ssa_instr), a);
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_MUL, number, number, index }, sizeof(ssa_instr), a);
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ADD, number, number, base }, sizeof(ssa_instr), a);
 	} else if (sub->kind == EXPR_DEREF) {

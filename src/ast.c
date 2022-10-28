@@ -391,7 +391,27 @@ decl_idx parse_decl(allocator *up)
 	decl_assoc pair = new_decl(up, snapshot.pos, snapshot.processed);
 	decl *d = pair.ptr;
 	if (!token_expect(TOKEN_NAME)) goto err;
+	// TODO: f: func() int32
+	// use an ifelse chain
 	if (token_match(':')) { // var decl
+		if (token_match_kw(tokens.kw_struct)) {
+			if (!token_expect('{')) goto err;
+			dyn_arr fields; dyn_arr_init(&fields, 0, ast.temps);
+			while (!token_match('}')) {
+				ident_t name = tokens.current.processed;
+				if (!token_expect(TOKEN_NAME)) goto err;
+				if (!token_expect(':')) goto err;
+				func_arg *field = dyn_arr_push(&fields, NULL, sizeof *field, ast.temps);
+				field->name = name;
+				field->type = parse_type(up);
+				if (!token_expect(';')) goto err;
+			}
+			d->kind = DECL_STRUCT;
+			d->type = new_type(up);
+			d->type->kind = TYPE_STRUCT;
+			d->type->params = scratch_from(&fields, ast.temps, up);
+			return pair.i;
+		}
 		d->kind = DECL_VAR;
 		d->type = parse_type(up);
 		if (!expect_or(d->type->kind != TYPE_FUNC,
