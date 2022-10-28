@@ -419,6 +419,7 @@ void type_check(module_t module, scope *top, map *expr2type, allocator *up)
 	scope_stack_l bottom = { .scope=top, .next=NULL };
 	for (; decl_it != decl_end; decl_it++, scope_it++)
 		type_check_decl(*decl_it, scope_it, &bottom, expr2type, up);
+	ast_dump(module);
 }
 
 void type_init(allocator *temps)

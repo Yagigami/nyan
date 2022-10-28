@@ -150,10 +150,284 @@ static int fprint_ir3_func(FILE *to, const ir3_func *f)
 	return printed;
 }
 
+static int global_indent;
+static const int indent_width = 2;
+
+static int fprint_newline(FILE *to)
+{
+	return fprintf(to, "\n") + fprint_spaces(to, global_indent);
+}
+
+static int fprint_type(FILE *to, type *t)
+{
+	int prn = 0;
+	switch (t->kind) {
+#define CASE(v, str) case v: prn += fprintf(to, str); break
+CASE(TYPE_NONE, "type_none");
+CASE(TYPE_BOOL, "type_bool");
+CASE(TYPE_INT8 , "type_int8" );
+CASE(TYPE_INT32, "type_int32");
+CASE(TYPE_INT64, "type_int64");
+#undef CASE
+case TYPE_PTR:
+	prn += fprintf(to, "type_ptr(");
+	global_indent += indent_width;
+	prn += fprint_newline(to);
+	prn += fprint_type(to, t->base);
+	prn += fprintf(to, ")");
+	global_indent -= indent_width;
+	break;
+case TYPE_ARRAY:
+	prn += fprintf(to, "type_array(");
+	global_indent += indent_width;
+	prn += fprint_newline(to);
+	prn += fprint_type(to, t->base);
+	prn += fprintf(to, ", %lx)", t->checked_count);
+	global_indent -= indent_width;
+	break;
+case TYPE_FUNC:
+	prn += fprintf(to, "type_func(");
+	global_indent += indent_width;
+	prn += fprint_newline(to);
+	prn += fprint_type(to, t->base);
+	for (func_arg *param = scratch_start(t->params); param != scratch_end(t->params); param++) {
+		prn += fprint_newline(to);
+		prn += fprintf(to, "{ n=%.*s t=", (int) ident_len(param->name), ident_str(param->name));
+		prn += fprint_type(to, param->type);
+		prn += fprintf(to, "}");
+	}
+	global_indent -= indent_width;
+	prn += fprintf(to, ")");
+	break;
+default:
+	prn += fprintf(to, "type_unknown");
+	break;
+	}
+	return prn;
+}
+
+static int fprint_expr(FILE *to, expr *e)
+{
+	int prn = 0;
+	switch (e->kind) {
+case EXPR_NONE:
+	prn += fprintf(to, "expr_none");
+	break;
+case EXPR_INT:
+	prn += fprintf(to, "expr_int(%lx)", e->value);
+	break;
+case EXPR_BOOL:
+	prn += fprintf(to, "expr_bool(%d)", e->name == tokens.kw_true);
+	break;
+case EXPR_NAME:
+	prn += fprintf(to, "expr_name(\"%.*s\")", (int) ident_len(e->name), ident_str(e->name));
+	break;
+case EXPR_ADD:
+	prn += fprintf(to, "expr_add[%c,%d](", e->binary.op, e->binary.op);
+	global_indent += indent_width;
+	prn += fprint_newline(to);
+	prn += fprint_expr(to, e->binary.L);
+	prn += fprintf(to, ", ");
+	prn += fprint_newline(to);
+	prn += fprint_expr(to, e->binary.R);
+	prn += fprintf(to, ")");
+	global_indent -= indent_width;
+	break;
+case EXPR_CMP:
+	prn += fprintf(to, "expr_cmp[%c,%d](", e->binary.op, e->binary.op);
+	global_indent += indent_width;
+	prn += fprint_newline(to);
+	prn += fprint_expr(to, e->binary.L);
+	prn += fprintf(to, ", ");
+	prn += fprint_newline(to);
+	prn += fprint_expr(to, e->binary.R);
+	prn += fprintf(to, ")");
+	global_indent -= indent_width;
+	break;
+case EXPR_INDEX:
+	prn += fprintf(to, "expr_index(");
+	global_indent += indent_width;
+	prn += fprint_newline(to);
+	prn += fprint_expr(to, e->binary.L);
+	prn += fprintf(to, ", ");
+	prn += fprint_newline(to);
+	prn += fprint_expr(to, e->binary.R);
+	prn += fprintf(to, ")");
+	global_indent -= indent_width;
+	break;
+case EXPR_UNDEF:
+	prn += fprintf(to, "expr_undef");
+	break;
+case EXPR_DEREF:
+	prn += fprintf(to, "expr_dereference(");
+	global_indent += indent_width;
+	prn += fprint_newline(to);
+	prn += fprint_expr(to, e->unary.operand);
+	prn += fprintf(to, ")");
+	global_indent -= indent_width;
+	break;
+case EXPR_ADDRESS:
+	prn += fprintf(to, "expr_addressof(");
+	global_indent += indent_width;
+	prn += fprint_newline(to);
+	prn += fprint_expr(to, e->unary.operand);
+	prn += fprintf(to, ")");
+	global_indent -= indent_width;
+	break;
+case EXPR_LOG_NOT:
+	prn += fprintf(to, "expr_logical_not(");
+	global_indent += indent_width;
+	prn += fprint_newline(to);
+	prn += fprint_expr(to, e->unary.operand);
+	prn += fprintf(to, ")");
+	global_indent -= indent_width;
+	break;
+case EXPR_INITLIST:
+	prn += fprintf(to, "expr_initlist(");
+	global_indent += indent_width;
+	prn += fprint_newline(to);
+	for (expr **field = scratch_start(e->call.args); field != scratch_end(e->call.args); field++) {
+		prn += fprint_expr(to, *field);
+		prn += fprintf(to, ", ");
+	}
+	prn += fprintf(to, ")");
+	global_indent -= indent_width;
+	break;
+case EXPR_CALL:
+	prn += fprintf(to, "expr_call(");
+	global_indent += indent_width;
+	prn += fprint_newline(to);
+	prn += fprint_expr(to, e->call.operand);
+	for (expr **arg = scratch_start(e->call.args); arg != scratch_end(e->call.args); arg++) {
+		prn += fprintf(to, ", ");
+		prn += fprint_expr(to, *arg);
+	}
+	prn += fprintf(to, ")");
+	global_indent -= indent_width;
+	break;
+case EXPR_CONVERT:
+	prn += fprintf(to, "expr_convert(");
+	global_indent += indent_width;
+	prn += fprint_newline(to);
+	prn += fprint_expr(to, e->convert.operand);
+	prn += fprintf(to, ", ");
+	prn += fprint_type(to, e->convert.type);
+	prn += fprintf(to, ")");
+	global_indent -= indent_width;
+	break;
+default:
+	prn += fprintf(to, "expr_unknown");
+	break;
+	}
+	return prn;
+}
+
+static int fprint_stmt_block(FILE *to, stmt_block blk);
+static int fprint_decl(FILE *to, decl *d);
+
+static int fprint_stmt(FILE *to, stmt *s)
+{
+	int prn = 0;
+	switch (s->kind) {
+case STMT_NONE:
+	prn += fprintf(to, "stmt_none");
+	break;
+case STMT_DECL:
+	prn += fprint_decl(to, idx2decl(s->d));
+	break;
+case STMT_BLOCK:
+	prn += fprint_stmt_block(to, s->blk);
+	break;
+case STMT_ASSIGN:
+	prn += fprintf(to, "stmt_assign(");
+	global_indent += indent_width;
+	prn += fprint_newline(to);
+	prn += fprint_expr(to, s->assign.L);
+	prn += fprintf(to, ", ");
+	prn += fprint_newline(to);
+	prn += fprint_expr(to, s->assign.R);
+	prn += fprintf(to, ")");
+	global_indent -= indent_width;
+	break;
+case STMT_RETURN:
+	prn += fprintf(to, "stmt_return(");
+	prn += fprint_expr(to, s->e);
+	prn += fprintf(to, ")");
+	break;
+case STMT_IFELSE:
+	prn += fprintf(to, "stmt_ifelse(");
+	global_indent += indent_width;
+	prn += fprint_newline(to);
+	prn += fprint_expr(to, s->ifelse.cond);
+	prn += fprint_newline(to);
+	prn += fprintf(to, "then=");
+	prn += fprint_stmt(to, s->ifelse.s_then);
+	prn += fprint_newline(to);
+	prn += fprintf(to, "else=");
+	prn += s->ifelse.s_else? fprint_stmt(to, s->ifelse.s_else): fprintf(to, "(null)");
+	global_indent -= indent_width;
+	break;
+case STMT_WHILE:
+	prn += fprintf(to, "stmt_while(");
+	global_indent += indent_width;
+	prn += fprint_newline(to);
+	prn += fprint_expr(to, s->ifelse.cond);
+	prn += fprint_newline(to);
+	prn += fprint_stmt(to, s->ifelse.s_then);
+	global_indent -= indent_width;
+	break;
+default:
+	prn += fprintf(to, "stmt_unknown");
+	break;
+	}
+	return prn;
+}
+
+int fprint_stmt_block(FILE *to, stmt_block blk)
+{
+	int prn = 0;
+	global_indent += indent_width;
+	prn += fprintf(to, "stmt_block(");
+	for (stmt **s = scratch_start(blk); s != scratch_end(blk); s++) {
+		prn += fprint_newline(to);
+		prn += fprint_stmt(to, *s);
+		prn += fprintf(to, ",");
+	}
+	global_indent -= indent_width;
+	return prn;
+}
+
+int fprint_decl(FILE *to, decl *d)
+{
+	if (d->kind == DECL_NONE) return 0;
+	int prn = 0;
+	switch (d->kind) {
+case DECL_VAR:
+	prn += fprintf(to, "decl_var(n=%.*s t=", (int) ident_len(d->name), ident_str(d->name));
+	prn += fprint_type(to, d->type);
+	prn += fprintf(to, " v=");
+	prn += fprint_expr(to, d->var_d.init);
+	prn += fprintf(to, ")");
+	break;
+case DECL_FUNC:
+	prn += fprintf(to, "decl_func(n=%*s t=", (int) ident_len(d->name), ident_str(d->name));
+	prn += fprint_type(to, d->type);
+	prn += fprint_newline(to);
+	prn += fprint_stmt_block(to, d->func_d.body);
+	prn += fprintf(to, ")");
+	break;
+default:
+	prn += fprintf(to, "decl_unknown");
+	break;
+	}
+	return prn;
+}
+
 int _print_impl(FILE *to, uint64_t bitmap, ...)
 {
 	va_list args;
 	va_start(args, bitmap);
+	global_indent = 0;
 	size_t n = bitmap & ((1<<ARGS_SHIFT)-1);
 	int printed = 0;
 	bitmap >>= ARGS_SHIFT;
@@ -178,6 +452,9 @@ int _print_impl(FILE *to, uint64_t bitmap, ...)
 		break;
 	case P_INT:
 		printed += fprintf(to, "%02tx", va_arg(args, print_int).v);
+		break;
+	case P_DECL:
+		printed += fprint_decl(to, va_arg(args, decl*));
 		break;
 	default:
 		__builtin_unreachable();

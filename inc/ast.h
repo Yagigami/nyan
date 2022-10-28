@@ -163,6 +163,7 @@ extern struct ast_state_t
 int ast_init(allocator *up);
 void ast_fini(allocator *up);
 void ast_one_more_error(void);
+int ast_dump(module_t ast);
 
 module_t parse_module(allocator *up);
 decl *idx2decl(decl_idx i);

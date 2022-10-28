@@ -647,10 +647,10 @@ void test_3ac(void)
 		ast_fini(gpa);
 
 		print(stdout, "3-address code:\n");
-		dump_3ac(m3ac, bytecode.names.buf.addr);
+		// dump_3ac(m3ac, bytecode.names.buf.addr);
 		ir3_module m2ac = convert_to_2ac(m3ac, gpa);
 		print(stdout, "2-address code:\n");
-		dump_3ac(m2ac, bytecode.names.buf.addr);
+		// dump_3ac(m2ac, bytecode.names.buf.addr);
 
 		gen_module gen = gen_x86_64(m2ac, gpa);
 		int e = elf_object_from(&gen, "simpler.o", &bytecode.names, gpa);

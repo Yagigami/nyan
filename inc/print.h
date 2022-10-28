@@ -31,6 +31,7 @@ typedef enum printable {
 	P_SOURCE_LINE,
 	P_3AC_FUNC,
 	P_INT,
+	P_DECL,
 	P_TOKEN,
 	P_TOKEN_KIND,
 
@@ -44,6 +45,7 @@ static_assert(P_END < (1<<PRINTABLE_SHIFT), "increase PRINTABLE_SHIFT");
 			source_idx : P_SOURCE_LINE, \
 			print_int : P_INT, \
 			ir3_func* : P_3AC_FUNC, \
+			decl* : P_DECL, \
 			token : P_TOKEN, \
 			token_kind : P_TOKEN_KIND \
 			))

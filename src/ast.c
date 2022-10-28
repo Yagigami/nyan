@@ -476,3 +476,11 @@ decl *idx2decl(decl_idx i)
 	return base[i];
 }
 
+int ast_dump(module_t ast)
+{
+	int prn = 0;
+	for (decl_idx *i = scratch_start(ast); i != scratch_end(ast); i++)
+		prn += print(stdout, idx2decl(*i), "\n\n");
+	return prn;
+}
+
