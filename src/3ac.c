@@ -220,10 +220,17 @@ case EXPR_ADDRESS:
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ADDRESS, number, name }, sizeof(ssa_instr), a);
 	} else if (sub->kind == EXPR_INDEX) {
 		ssa_ref index = ir3_expr(f, sub->binary.R, e2t, stk, REF_NONE, a);
-		ssa_ref base = ir3_expr(f, sub->binary.L, e2t, stk, REF_NONE, a);
 		type *base_t = (type*) map_find(e2t, (key_t) sub->binary.L, intern_hash((key_t) sub->binary.L), intern_cmp)->v;
-		assert(base_t->kind == TYPE_PTR);
+		assert(base_t->kind == TYPE_ARRAY);
 		type_info elem_t = base_t->base->tinf;
+		ssa_ref base;
+		if (sub->binary.L->kind == EXPR_DEREF) {
+			base = ir3_expr(f, sub->binary.L->unary.operand, e2t, stk, REF_NONE, a);
+		} else {
+			ssa_ref arr = ir3_expr(f, sub->binary.L, e2t, stk, REF_NONE, a);
+			base = new_local(&f->locals, TINFO_PTR); 
+			dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ADDRESS, base, arr }, sizeof(ssa_instr), a);
+		}
 		number = new_local(&f->locals, tinfo);
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_IMM, number }, sizeof(ssa_instr), a);
 		dyn_arr_push(&f->ins, &(ssa_instr){ .v=TINFO_GET_SIZE(elem_t) }, sizeof(ssa_instr), a);
@@ -238,10 +245,15 @@ case EXPR_ADDRESS:
 case EXPR_DEREF:
 	{
 	ssa_ref addr = ir3_expr(f, e->unary.operand, e2t, stk, REF_NONE, a);
+	int size = TINFO_GET_SIZE(tinfo);
+	bool primitive = size == 1 || size == 2 || size == 4 || size == 8;
 	if (rvalue == REF_NONE) {
+		assert(primitive);
 		number = new_local(&f->locals, tinfo);
-		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_LOAD, number, addr }, sizeof(ssa_instr), a);
+		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=primitive? SSA_LOAD: SSA_MEMCOPY, number, addr }, sizeof(ssa_instr), a);
 	} else {
+		type_info *rvt = f->locals.buf.addr + rvalue * sizeof *rvt;
+		assert(TINFO_GET_SIZE(*rvt) > 0);
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_STORE, rvalue, addr }, sizeof(ssa_instr), a);
 		number = rvalue; // maybe set this to REF_NONE, it should not get read, regardless
 	}
@@ -251,16 +263,29 @@ case EXPR_DEREF:
 case EXPR_INDEX:
 	{
 	ssa_ref index = ir3_expr(f, e->binary.R, e2t, stk, REF_NONE, a);
-	ssa_ref base = ir3_expr(f, e->binary.L, e2t, stk, REF_NONE, a);
+	ssa_ref base;
+	expr *sub = e->binary.L;
+	if (sub->kind == EXPR_DEREF) {
+		base = ir3_expr(f, sub->unary.operand, e2t, stk, REF_NONE, a);
+	} else {
+		ssa_ref arr = ir3_expr(f, e->binary.L, e2t, stk, REF_NONE, a);
+		base = new_local(&f->locals, TINFO_PTR);
+		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ADDRESS, base, arr }, sizeof(ssa_instr), a);
+	}
 	ssa_ref addr = new_local(&f->locals, TINFO_PTR);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_IMM, addr }, sizeof(ssa_instr), a);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .v=TINFO_GET_SIZE(tinfo) }, sizeof(ssa_instr), a);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_MUL, addr, addr, index }, sizeof(ssa_instr), a);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ADD, addr, addr, base }, sizeof(ssa_instr), a);
+	int size = TINFO_GET_SIZE(tinfo);
+	bool primitive = size == 1 || size == 2 || size == 4 || size == 8;
 	if (rvalue == REF_NONE) {
 		number = new_local(&f->locals, tinfo);
-		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_LOAD, number, addr }, sizeof(ssa_instr), a);
+		assert(primitive);
+		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=primitive? SSA_LOAD: SSA_MEMCOPY, number, addr }, sizeof(ssa_instr), a);
 	} else {
+		type_info *rvt = f->locals.buf.addr + rvalue * sizeof *rvt;
+		assert(TINFO_GET_SIZE(*rvt) > 0);
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_STORE, rvalue, addr }, sizeof(ssa_instr), a);
 		number = rvalue;
 	}
@@ -647,7 +672,7 @@ void test_3ac(void)
 		ast_fini(gpa);
 
 		print(stdout, "3-address code:\n");
-		// dump_3ac(m3ac, bytecode.names.buf.addr);
+		dump_3ac(m3ac, bytecode.names.buf.addr);
 		ir3_module m2ac = convert_to_2ac(m3ac, gpa);
 		print(stdout, "2-address code:\n");
 		// dump_3ac(m2ac, bytecode.names.buf.addr);

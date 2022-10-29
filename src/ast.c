@@ -40,7 +40,7 @@ static expr *parse_expr_add(allocator *up);
 
 static type *parse_type(allocator *up);
 static type *parse_type_prim(allocator *up);
-static type *parse_typearget(type *base, allocator *up);
+static type *parse_type_target(type *base, allocator *up);
 static void parse_type_params(dyn_arr *p, allocator *up);
 
 typedef struct {
@@ -290,9 +290,11 @@ type *parse_type_prim(allocator *up)
 	return prim;
 }
 
-type *parse_typearget(type *base, allocator *up)
+type *parse_type_target(type *base, allocator *up)
 {
 	while (true) if (token_match('[')) {
+		if (!expect_or(base->kind != TYPE_ARRAY, "cannot make an array of arrays, for N-dimensional arrays, use [L1,L2,L3,...]\n"))
+			break;
 		type *tgt = new_type(up);
 		tgt->kind = TYPE_ARRAY;
 		tgt->base = base;
@@ -312,7 +314,7 @@ err:
 type *parse_type(allocator *up)
 {
 	type *t = parse_type_prim(up);
-	t = parse_typearget(t, up);
+	t = parse_type_target(t, up);
 	if (t->kind == TYPE_FUNC) {
 		dyn_arr params;
 		dyn_arr_init(&params, 0*sizeof(func_arg), ast.temps);

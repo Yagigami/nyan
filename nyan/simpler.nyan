@@ -1,6 +1,15 @@
-test func(p: int32[3][2]*): int32
+smol func(): int32
 {
-	k: bool = (*p)[1][2] == 1;
+	b: int8*[1] = undef;
+	c: int8 = 1;
+	b[0] = &c;
+	*b[0] = 2;
+	return c;
+}
+
+test func(p: int32[2]*): int32
+{
+	k: bool = (*p)[1] == 1;
 	return k: int32;
 }
 
@@ -15,33 +24,33 @@ set func(p: int64*, v: int32): int32
 	return 0;
 }
 
-ptr func(): int8
-{
-	a: int32 = 4;
-	p: int32* = &a;
-	*p = 2;
-	q: int32** = &p;
-	b: int32 = 6;
-	*q = &b;
-	c: int32 = *p;
-	arr: int64[4][2] = { { 1, 2, 3, 4 }, { 5, 6, 7, 8 } };
-	r: int64[4]* = &arr[1];
-	u: int64* = rando(r);
-	s: int64[4]** = &r;
-	t: int64* = &(**s)[2];
-	d: int32*[2][3] = undef;
-	d[1][0] = *q;
-	*d[1][0] = 9;
-	extra: int8 = *u - 7 :int8;
-	zero: int8 = set(t, *d[1][0]): int8;
-	return (*t: int8) + zero + extra;
-}
-
-ndarr func(): int32
-{
-	a: int32[3][2] = { { 2, 4, 6 }, { 1, 3, 5 } };
-	return a[0][2] + a[1][1];
-}
+// ptr func(): int8
+// {
+	// a: int32 = 4;
+	// p: int32* = &a;
+	// *p = 2;
+	// q: int32** = &p;
+	// b: int32 = 6;
+	// *q = &b;
+	// c: int32 = *p;
+	// arr: int64[4][2] = { { 1, 2, 3, 4 }, { 5, 6, 7, 8 } };
+	// r: int64[4]* = &arr[1];
+	// u: int64* = rando(r);
+	// s: int64[4]** = &r;
+	// t: int64* = &(**s)[2];
+	// d: int32*[2][3] = undef;
+	// d[1][0] = *q;
+	// *d[1][0] = 9;
+	// extra: int8 = *u - 7 :int8;
+	// zero: int8 = set(t, *d[1][0]): int8;
+	// return (*t: int8) + zero + extra;
+// }
+// 
+// ndarr func(): int32
+// {
+	// a: int32[3][2] = { { 2, 4, 6 }, { 1, 3, 5 } };
+	// return a[0][2] + a[1][1];
+// }
 
 ddef func(): int32
 {
@@ -68,11 +77,24 @@ diffsizes func(): int32
 
 entry func() : int32
 {
+	z :int32 = smol();
 	a :int32 = 1;
 	b :int32 = 3;
 	if (foo(true))
 		return 1;
-	return uses_for(ptr()) - 45;
+	arr1: int32[2] = { 2, 1 };
+	arr2: int32[2] = { 1, 2 };
+	arr3: int64[4] = { 9, 8, 7, 6 };
+	p: int64[4]* = &arr3;
+	p2: int64[4]** = &p;
+	p3: int64[4]*** = &p2;
+	ap: int64[4]***[2] = undef;
+	ap[1] = p3;
+	return *rando(**ap[1]): int32;
+	return *rando(&arr3): int32;
+	return test(&arr2);
+	return z;
+	// return uses_for(ptr()) - 45;
 }
 
 uses_arr func(base: int32): int32

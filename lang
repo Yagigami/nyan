@@ -7,7 +7,7 @@ PRIMITIVES: type : primit target* [ params ]
 	floating-point	-> floatN, N=32,64,80
 	pointer		-> T *, T * $ T.sentinel
 	(slice		-> T {*})
-	array 		-> T [N]
+	array 		-> non-array [N]
 	function	-> func funcparams : R
 	// make it so that fptr is appf: func**[13](x:int32,y:int32):int32
 	boolean

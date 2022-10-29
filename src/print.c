@@ -152,6 +152,7 @@ static int fprint_ir3_func(FILE *to, const ir3_func *f)
 
 static int global_indent;
 static const int indent_width = 2;
+static map *global_e2t;
 
 static int fprint_newline(FILE *to)
 {
@@ -171,32 +172,22 @@ CASE(TYPE_INT64, "type_int64");
 #undef CASE
 case TYPE_PTR:
 	prn += fprintf(to, "type_ptr(");
-	global_indent += indent_width;
-	prn += fprint_newline(to);
 	prn += fprint_type(to, t->base);
 	prn += fprintf(to, ")");
-	global_indent -= indent_width;
 	break;
 case TYPE_ARRAY:
 	prn += fprintf(to, "type_array(");
-	global_indent += indent_width;
-	prn += fprint_newline(to);
 	prn += fprint_type(to, t->base);
 	prn += fprintf(to, ", %lx)", t->checked_count);
-	global_indent -= indent_width;
 	break;
 case TYPE_FUNC:
 	prn += fprintf(to, "type_func(");
-	global_indent += indent_width;
-	prn += fprint_newline(to);
 	prn += fprint_type(to, t->base);
 	for (func_arg *param = scratch_start(t->params); param != scratch_end(t->params); param++) {
-		prn += fprint_newline(to);
 		prn += fprintf(to, "{ n=%.*s t=", (int) ident_len(param->name), ident_str(param->name));
 		prn += fprint_type(to, param->type);
-		prn += fprintf(to, "}");
+		prn += fprintf(to, "}, ");
 	}
-	global_indent -= indent_width;
 	prn += fprintf(to, ")");
 	break;
 default:
@@ -319,7 +310,12 @@ default:
 	prn += fprintf(to, "expr_unknown");
 	break;
 	}
-	return prn;
+	if (!global_e2t || e->kind == EXPR_CONVERT) return prn;
+	map_entry *assoc = map_find(global_e2t, (key_t) e, intern_hash((key_t) e), intern_cmp);
+	prn += fprintf(to, ": ");
+	if (!assoc) return prn + fprintf(to, "(null)");
+	type *t = (type*) assoc->v;
+	return prn + fprint_type(to, t);
 }
 
 static int fprint_stmt_block(FILE *to, stmt_block blk);
@@ -455,6 +451,9 @@ int _print_impl(FILE *to, uint64_t bitmap, ...)
 		break;
 	case P_DECL:
 		printed += fprint_decl(to, va_arg(args, decl*));
+		break;
+	case P_E2T:
+		global_e2t = va_arg(args, print_acquire_e2t).e2t;
 		break;
 	default:
 		__builtin_unreachable();
