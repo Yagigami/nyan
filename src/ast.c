@@ -8,6 +8,11 @@
 #include <string.h>
 
 
+type type_none  = { .kind=TYPE_NONE,  .size=0, .align=1 };
+type type_int8  = { .kind=TYPE_INT8,  .size=1, .align=1 };
+type type_int32 = { .kind=TYPE_INT32, .size=4, .align=4 };
+type type_int64 = { .kind=TYPE_INT64, .size=8, .align=8 };
+type type_bool  = { .kind=TYPE_BOOL,  .size=1, .align=1 };
 
 struct ast_state_t ast;
 
@@ -87,7 +92,7 @@ static type *new_type(allocator *up)
 {
 	type *t = ALLOC(up, sizeof *t, alignof *t).addr;
 	t->kind = TYPE_NONE;
-	t->tinf = -1;
+	t->size = -1;
 	return t;
 }
 
@@ -96,7 +101,7 @@ type *type_ptr(allocator *up, type *base)
 	type *t = new_type(up);
 	t->kind = TYPE_PTR;
 	t->base = base;
-	t->tinf = TINFO_PTR;
+	t->size = 8;
 	return t;
 }
 
@@ -149,8 +154,13 @@ expr *parse_expr_postfix(allocator *up)
 		expr *deref = new_expr(up);
 		deref->kind = EXPR_INDEX;
 		deref->pos = token_pos();
-		deref->binary.L = operand;
-		deref->binary.R = parse_expr(up);
+		dyn_arr indices; dyn_arr_init(&indices, 0, ast.temps);
+		do {
+			expr *idx = parse_expr(up);
+			dyn_arr_push(&indices, &idx, sizeof idx, ast.temps);
+		} while (token_match(','));
+		deref->call.operand = operand;
+		deref->call.args = scratch_from(&indices, ast.temps, up);
 		if (!token_expect(']')) goto err;
 		operand = deref;
 	} else break;
@@ -271,21 +281,22 @@ void parse_type_params(dyn_arr *p, allocator *up)
 
 type *parse_type_prim(allocator *up)
 {
-	type *prim = new_type(up);
+	type *prim;
 	if (token_match_kw(tokens.kw_func)) {
+		prim = new_type(up);
 		prim->kind = TYPE_FUNC;
 	} else if (token_match_kw(tokens.kw_int8)) {
-		prim->kind = TYPE_INT8;
+		prim = &type_int8;
 	} else if (token_match_kw(tokens.kw_int32)) {
-		prim->kind = TYPE_INT32;
+		prim = &type_int32;
 	} else if (token_match_kw(tokens.kw_int64)) {
-		prim->kind = TYPE_INT64;
+		prim = &type_int64;
 	} else if (token_match_kw(tokens.kw_bool)) {
-		prim->kind = TYPE_BOOL;
+		prim = &type_bool;
 	} else {
 		if (!expect_or(false, token_pos(), "unknown type ", tokens.current, "\n"))
 			token_skip_to_newline();
-		prim->kind = TYPE_NONE;
+		prim = &type_none;
 	}
 	return prim;
 }
@@ -296,10 +307,15 @@ type *parse_type_target(type *base, allocator *up)
 		if (!expect_or(base->kind != TYPE_ARRAY, "cannot make an array of arrays, for N-dimensional arrays, use [L1,L2,L3,...]\n"))
 			break;
 		type *tgt = new_type(up);
+		dyn_arr sizes; dyn_arr_init(&sizes, 0, ast.temps);
+		do {
+			expr *sz = parse_expr(up);
+			dyn_arr_push(&sizes, &sz, sizeof sz, ast.temps);
+		} while (token_match(','));
+		if (!token_expect(']')) goto err;
 		tgt->kind = TYPE_ARRAY;
 		tgt->base = base;
-		tgt->unchecked_count = parse_expr(up);
-		if (!token_expect(']')) goto err;
+		tgt->sizes = scratch_from(&sizes, ast.temps, up);
 		base = tgt;
 	} else if (token_match('*')) {
 		type *tgt = new_type(up);

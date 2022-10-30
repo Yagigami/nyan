@@ -47,10 +47,10 @@ typedef struct map_stack {
 	struct map_stack *next;
 } map_stack;
 
-static ssa_ref new_local(dyn_arr *locals, type_info tinfo)
+static ssa_ref new_local(dyn_arr *locals, type *t)
 {
-	ssa_ref num = dyn_arr_size(locals)/sizeof tinfo;
-	dyn_arr_push(locals, &tinfo, sizeof tinfo, bytecode.temps);
+	ssa_ref num = dyn_arr_size(locals)/sizeof t;
+	dyn_arr_push(locals, &t, sizeof t, bytecode.temps);
 	return num;
 }
 
@@ -59,15 +59,15 @@ static void serialize_initlist(byte *blob, expr *e, type *t, map *e2t, map_stack
 	switch (e->kind) {
 case EXPR_INITLIST:
 	assert(t->kind == TYPE_ARRAY);
-	type_info tinfo = t->base->tinf;
-	for (expr **part = scratch_start(e->call.args); part != scratch_end(e->call.args); part++) {
-		serialize_initlist(blob, *part, t->base, e2t, stk);
-		blob += TINFO_GET_SIZE(tinfo); // TODO: basically query the `next` insert pos from a layout structure
+	assert(scratch_len(t->sizes) == sizeof(expr*) && "not implemented");
+	for (expr **field = scratch_start(e->call.args); field != scratch_end(e->call.args); field++) {
+		serialize_initlist(blob, *field, t->base, e2t, stk);
+		blob += t->base->size;
 	}
 	break;
 case EXPR_INT:
 	// little endian things
-	memcpy(blob, &e->value, TINFO_GET_SIZE(t->tinf));
+	memcpy(blob, &e->value, t->size);
 	break;
 case EXPR_BOOL:
 	memcpy(blob, &e->value, 1);
@@ -96,11 +96,10 @@ static ident_t ir3_expr(ir3_func *f, expr *e, map *e2t, map_stack *stk, ssa_ref 
 {
 	map_entry *asso = map_find(e2t, (key_t) e, intern_hash((key_t) e), intern_cmp); assert(asso);
 	type *t = (type*) asso->v;
-	type_info tinfo = t->tinf;
 	ssa_ref number;
 	switch (e->kind) {
 case EXPR_INT:
-	number = new_local(&f->locals, tinfo);
+	number = new_local(&f->locals, t);
 	assert(e->value <= (ssa_extension)-1);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_IMM, number }, sizeof(ssa_instr), a);
 	// just little endian things // btw this is undefined behavior
@@ -108,7 +107,7 @@ case EXPR_INT:
 	break;
 
 case EXPR_BOOL:
-	number = new_local(&f->locals, tinfo);
+	number = new_local(&f->locals, t);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_BOOL, number, e->name == tokens.kw_true }, sizeof(ssa_instr), a);
 	break;
 	
@@ -161,7 +160,7 @@ case EXPR_CALL:
 	if (num_args)
 		memcpy(instr++, buf, sizeof buf);
 	// post after the arguments are evaluated
-	number = call->to = new_local(&f->locals, tinfo);
+	number = call->to = new_local(&f->locals, t);
 	call = dyn_arr_push(&f->ins, m.addr, (void*) instr - m.addr, a);
 	static_assert(((ident_t) -1) < 0, "");
 	if (func < 0) {
@@ -175,7 +174,7 @@ case EXPR_ADD:
 	{
 	ssa_ref L = ir3_expr(f, e->binary.L, e2t, stk, REF_NONE, a);
 	ssa_ref R = ir3_expr(f, e->binary.R, e2t, stk, REF_NONE, a);
-	number = new_local(&f->locals, tinfo);
+	number = new_local(&f->locals, t);
 	token_kind op = e->binary.op;
 	enum ssa_opcode opc = 	op == '+' ? SSA_ADD:
 				op == '-' ? SSA_SUB:
@@ -188,7 +187,7 @@ case EXPR_CMP:
 	{
 	ssa_ref L = ir3_expr(f, e->binary.L, e2t, stk, REF_NONE, a);
 	ssa_ref R = ir3_expr(f, e->binary.R, e2t, stk, REF_NONE, a);
-	number = new_local(&f->locals, tinfo);
+	number = new_local(&f->locals, t);
 	token_kind op = e->binary.op;
 	enum ssa_branch_cc cc =	op == TOKEN_EQ ? SSAB_EQ: op == TOKEN_NEQ? SSAB_NE:
 				op == '<'      ? SSAB_LT: op == TOKEN_LEQ? SSAB_LE:
@@ -205,7 +204,7 @@ case EXPR_CMP:
 case EXPR_LOG_NOT:
 	{
 	ssa_ref inner = ir3_expr(f, e->unary.operand, e2t, stk, REF_NONE, a);
-	number = new_local(&f->locals, tinfo);
+	number = new_local(&f->locals, t);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_BOOL_NEG, number, inner }, sizeof(ssa_instr), a);
 	break;
 	}
@@ -216,25 +215,29 @@ case EXPR_ADDRESS:
 	assert(rvalue == REF_NONE);
 	if (sub->kind == EXPR_NAME) {
 		ssa_ref name = ir3_expr(f, sub, e2t, stk, REF_NONE, a);
-		number = new_local(&f->locals, tinfo);
+		number = new_local(&f->locals, t);
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ADDRESS, number, name }, sizeof(ssa_instr), a);
 	} else if (sub->kind == EXPR_INDEX) {
-		ssa_ref index = ir3_expr(f, sub->binary.R, e2t, stk, REF_NONE, a);
 		type *base_t = (type*) map_find(e2t, (key_t) sub->binary.L, intern_hash((key_t) sub->binary.L), intern_cmp)->v;
 		assert(base_t->kind == TYPE_ARRAY);
-		type_info elem_t = base_t->base->tinf;
 		ssa_ref base;
 		if (sub->binary.L->kind == EXPR_DEREF) {
 			base = ir3_expr(f, sub->binary.L->unary.operand, e2t, stk, REF_NONE, a);
 		} else {
 			ssa_ref arr = ir3_expr(f, sub->binary.L, e2t, stk, REF_NONE, a);
-			base = new_local(&f->locals, TINFO_PTR); 
+			base = new_local(&f->locals, t);
 			dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ADDRESS, base, arr }, sizeof(ssa_instr), a);
 		}
-		number = new_local(&f->locals, tinfo);
+		number = new_local(&f->locals, t);
+
+		expr **fst_idx = scratch_start(sub->call.args);
+		ssa_ref offset = ir3_expr(f, *fst_idx, e2t, stk, REF_NONE, a);
+		for (; 0; )
+			;
+
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_IMM, number }, sizeof(ssa_instr), a);
-		dyn_arr_push(&f->ins, &(ssa_instr){ .v=TINFO_GET_SIZE(elem_t) }, sizeof(ssa_instr), a);
-		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_MUL, number, number, index }, sizeof(ssa_instr), a);
+		dyn_arr_push(&f->ins, &(ssa_instr){ .v=base_t->base->size }, sizeof(ssa_instr), a);
+		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_MUL, number, number, offset }, sizeof(ssa_instr), a);
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ADD, number, number, base }, sizeof(ssa_instr), a);
 	} else if (sub->kind == EXPR_DEREF) {
 		number = ir3_expr(f, sub->unary.operand, e2t, stk, REF_NONE, a);
@@ -245,15 +248,15 @@ case EXPR_ADDRESS:
 case EXPR_DEREF:
 	{
 	ssa_ref addr = ir3_expr(f, e->unary.operand, e2t, stk, REF_NONE, a);
-	int size = TINFO_GET_SIZE(tinfo);
+	int size = t->size;
 	bool primitive = size == 1 || size == 2 || size == 4 || size == 8;
 	if (rvalue == REF_NONE) {
 		assert(primitive);
-		number = new_local(&f->locals, tinfo);
+		number = new_local(&f->locals, t);
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=primitive? SSA_LOAD: SSA_MEMCOPY, number, addr }, sizeof(ssa_instr), a);
 	} else {
-		type_info *rvt = f->locals.buf.addr + rvalue * sizeof *rvt;
-		assert(TINFO_GET_SIZE(*rvt) > 0);
+		type **rvt = f->locals.buf.addr + rvalue * sizeof *rvt;
+		assert(rvt[0]->size > 0);
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_STORE, rvalue, addr }, sizeof(ssa_instr), a);
 		number = rvalue; // maybe set this to REF_NONE, it should not get read, regardless
 	}
@@ -262,30 +265,39 @@ case EXPR_DEREF:
 
 case EXPR_INDEX:
 	{
-	ssa_ref index = ir3_expr(f, e->binary.R, e2t, stk, REF_NONE, a);
 	ssa_ref base;
 	expr *sub = e->binary.L;
 	if (sub->kind == EXPR_DEREF) {
 		base = ir3_expr(f, sub->unary.operand, e2t, stk, REF_NONE, a);
 	} else {
-		ssa_ref arr = ir3_expr(f, e->binary.L, e2t, stk, REF_NONE, a);
-		base = new_local(&f->locals, TINFO_PTR);
+		ssa_ref arr = ir3_expr(f, e->call.operand, e2t, stk, REF_NONE, a);
+		// TODO: make an anyptr type
+		base = new_local(&f->locals, &type_int64);
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ADDRESS, base, arr }, sizeof(ssa_instr), a);
 	}
-	ssa_ref addr = new_local(&f->locals, TINFO_PTR);
+
+	// a: T[X,Y,Z];
+	// &a[x,y,z] = &a + (((z) * Y + y) * X + x) * sizeof(T)
+	expr **fst_idx = scratch_start(e->call.args);
+	ssa_ref offset = ir3_expr(f, *fst_idx, e2t, stk, REF_NONE, a);
+	assert(fst_idx+1 == scratch_end(e->call.args));
+	for (; 0; )
+		;
+
+	ssa_ref addr = new_local(&f->locals, &type_int64);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_IMM, addr }, sizeof(ssa_instr), a);
-	dyn_arr_push(&f->ins, &(ssa_instr){ .v=TINFO_GET_SIZE(tinfo) }, sizeof(ssa_instr), a);
-	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_MUL, addr, addr, index }, sizeof(ssa_instr), a);
+	dyn_arr_push(&f->ins, &(ssa_instr){ .v=t->size }, sizeof(ssa_instr), a);
+	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_MUL, addr, addr, offset }, sizeof(ssa_instr), a);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ADD, addr, addr, base }, sizeof(ssa_instr), a);
-	int size = TINFO_GET_SIZE(tinfo);
+	int size = t->size;
 	bool primitive = size == 1 || size == 2 || size == 4 || size == 8;
 	if (rvalue == REF_NONE) {
-		number = new_local(&f->locals, tinfo);
+		number = new_local(&f->locals, t);
 		assert(primitive);
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=primitive? SSA_LOAD: SSA_MEMCOPY, number, addr }, sizeof(ssa_instr), a);
 	} else {
-		type_info *rvt = f->locals.buf.addr + rvalue * sizeof *rvt;
-		assert(TINFO_GET_SIZE(*rvt) > 0);
+		type **rvt = f->locals.buf.addr + rvalue * sizeof *rvt;
+		assert(rvt[0]->size > 0);
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_STORE, rvalue, addr }, sizeof(ssa_instr), a);
 		number = rvalue;
 	}
@@ -294,7 +306,7 @@ case EXPR_INDEX:
 
 case EXPR_INITLIST:
 	{
-	ir3_sym blob = { .m=ALLOC(a, TINFO_GET_SIZE(tinfo), 8), .align=TINFO_GET_ALIGN(tinfo), .kind=IR3_BLOB };
+	ir3_sym blob = { .m=ALLOC(a, t->size, 8), .align=t->align, .kind=IR3_BLOB };
 	idx_t ref = dyn_arr_size(&bytecode.blob) / sizeof(ir3_sym);
 	dyn_arr_push(&bytecode.blob, &blob, sizeof blob, a);
 	serialize_initlist(blob.m.addr, e, t, e2t, stk);
@@ -303,10 +315,10 @@ case EXPR_INITLIST:
 	assert(buf[len] == '\0');
 	map_entry name = global_name((ident_t) buf, len, a);
 	dyn_arr_push(&bytecode.names, &name, sizeof name, a);
-	ssa_ref local = new_local(&f->locals, TINFO_PTR);
+	ssa_ref local = new_local(&f->locals, &type_int64);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_GLOBAL_REF, local }, sizeof(ssa_instr), a);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .v=ref }, sizeof(ssa_extension), a);
-	number = new_local(&f->locals, tinfo);
+	number = new_local(&f->locals, t);
 	// FIXME: also take the address of target, and remove the `lea` in codegen
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_MEMCOPY, number, local }, sizeof(ssa_instr), a);
 	break;
@@ -316,13 +328,13 @@ case EXPR_CONVERT:
 	{
 	assert(rvalue == REF_NONE);
 	ssa_ref from = ir3_expr(f, e->convert.operand, e2t, stk, rvalue, a);
-	number = new_local(&f->locals, tinfo);
+	number = new_local(&f->locals, t);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_COPY, .to=number, .L=from }, sizeof(ssa_instr), a);
 	break;
 	}
 
 case EXPR_UNDEF:
-	number = new_local(&f->locals, tinfo);
+	number = new_local(&f->locals, t);
 	// no-op
 	break;
 
@@ -344,8 +356,8 @@ case DECL_VAR:
 	e->k = d->name;
 	map_entry *init_entry = map_find(e2t, (key_t) d->var_d.init, intern_hash((key_t) d->var_d.init), intern_cmp); assert(init_entry);
 	type *init_type = (type*) init_entry->v;
-	if (d->var_d.init->kind == EXPR_NAME || d->type->tinf != init_type->tinf) {
-		ssa_ref number = new_local(&f->locals, d->type->tinf);
+	if (d->var_d.init->kind == EXPR_NAME || d->type->kind != init_type->kind) {
+		ssa_ref number = new_local(&f->locals, d->type);
 		e->v = number;
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_COPY, number, val }, sizeof(ssa_instr), a);
 	} else {
@@ -380,7 +392,7 @@ case STMT_RETURN:
 case STMT_IFELSE:
 	{
 	ssa_ref cond = ir3_expr(f, s->ifelse.cond, e2t, stk, REF_NONE, a);
-	ssa_ref check = new_local(&f->locals, TINFO_BOOL);
+	ssa_ref check = new_local(&f->locals, &type_bool);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_BOOL, check, 0 }, sizeof(ssa_instr), a);
 	buf[0] = (ssa_instr){ .kind=SSA_BR, SSAB_NE, cond, check };
 	buf[1] = (ssa_instr){ .v = -1 };
@@ -460,7 +472,7 @@ case STMT_WHILE:
 	ir3_node *cond_blk = dyn_arr_push(&f->nodes, NULL, sizeof *cond_blk, a);
 	cond_blk[-1].end = cond_blk->begin = dyn_arr_size(&f->ins);
 	ssa_ref cond = ir3_expr(f, s->ifelse.cond, e2t, stk, REF_NONE, a);
-	ssa_ref check = new_local(&f->locals, TINFO_BOOL);
+	ssa_ref check = new_local(&f->locals, &type_bool);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_BOOL, check, 0 }, sizeof(ssa_instr), a);
 	ssa_ref lbl_post = dyn_arr_size(&f->nodes) / sizeof(ir3_node);
 	ir3_node *post = dyn_arr_push(&f->nodes, NULL, sizeof *post, a);
@@ -502,8 +514,7 @@ static void ir3_decl_func(ir3_func *f, decl *d, map *e2t, map_stack *stk, scope*
 		map_entry *e = map_add(&top.ast2num, arg->name, intern_hash, a);
 		e->k = arg->name;
 		e->v = arg - start;
-		type_info tinfo = arg->type->tinf;
-		dyn_arr_push(&f->locals, &tinfo, sizeof tinfo, a);
+		new_local(&f->locals, arg->type);
 		// %2 = arg.2
 		// no real constraint for both to be the same
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ARG, arg - start, arg - start }, sizeof(ssa_instr), a);
@@ -668,8 +679,6 @@ void test_3ac(void)
 		map_fini(&tokens.idents, tokens.up);
 		scope_fini(&global, ast.temps);
 		allocator_geom_fini(&perma);
-		allocator_geom_fini(&just_ast);
-		ast_fini(gpa);
 
 		print(stdout, "3-address code:\n");
 		dump_3ac(m3ac, bytecode.names.buf.addr);
@@ -678,6 +687,8 @@ void test_3ac(void)
 		// dump_3ac(m2ac, bytecode.names.buf.addr);
 
 		gen_module gen = gen_x86_64(m2ac, gpa);
+		allocator_geom_fini(&just_ast);
+		ast_fini(gpa);
 		int e = elf_object_from(&gen, "simpler.o", &bytecode.names, gpa);
 		if (e < 0) perror("objfile not generated");
 

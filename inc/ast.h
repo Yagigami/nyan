@@ -75,19 +75,17 @@ struct expr;
 struct decl;
 struct stmt;
 struct type;
-typedef uint32_t type_info;
 
 typedef struct type {
 	struct type *base;
+	uint64_t size;
 	union {
 		// func_arg array // also used for  struct
 		scratch_arr params;
-		// FIXME: dirty and (wah wah) unsafe
-		// should get fixed when adding struct layouts
-		union { size_t checked_count; struct expr *unchecked_count; };
+		scratch_arr sizes; // expr(int) * array
 	};
 	type_kind kind;
-	type_info tinf;
+	uint32_t align;
 } type;
 
 // FIXME: this is aliased with a `decl` in type_check.c
@@ -170,6 +168,12 @@ decl *idx2decl(decl_idx i);
 
 expr *expr_convert(allocator *a, expr *e, type *to);
 type *type_ptr(allocator *a, type *base);
+
+extern type type_none;
+extern type type_int8;
+extern type type_int32;
+extern type type_int64;
+extern type type_bool;
 
 #define AST_DUP(a,v) ast_dup((a),&(v),sizeof (v))
 

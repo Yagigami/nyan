@@ -28,6 +28,7 @@ case EXPR_BOOL:
 	// nop
 	break;
 case EXPR_CALL:
+case EXPR_INDEX:
 	resolve_expr(e->call.operand, list, up, final);
 	for (expr **it = scratch_start(e->call.args), **end = scratch_end(e->call.args);
 			it != end; it++)
@@ -35,7 +36,6 @@ case EXPR_CALL:
 	break;
 case EXPR_ADD:
 case EXPR_CMP:
-case EXPR_INDEX:
 	resolve_expr(e->binary.L, list, up, final);
 	resolve_expr(e->binary.R, list, up, final);
 	break;
