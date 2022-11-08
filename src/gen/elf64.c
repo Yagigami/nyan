@@ -163,6 +163,7 @@ int elf_object_from(const gen_module *mod, const char *path, const dyn_arr *name
 			sym->st_size = it->size;
 			goto iter;
 		}
+		assert(it->kind == GEN_CODE);
 
 		sym->st_info = ELF64_ST_INFO(STB_GLOBAL, STT_FUNC);
 		sym->st_shndx = SECTION_TEXT;
@@ -173,8 +174,8 @@ int elf_object_from(const gen_module *mod, const char *path, const dyn_arr *name
 				pair != pair_end; pair++) {
 			Elf64_Rela *reloc = out.buf.addr + shdr[SECTION_RELA_TEXT].sh_offset + r_idx * sizeof *reloc;
 			reloc->r_offset = pair->offset + text_offset;
-			size_t genref2elfsym = 1 + pair->symref;
-			reloc->r_info = ELF64_R_INFO(genref2elfsym, R_X86_64_PC32);
+			idx_t *renum = scratch_start(mod->renum);
+			reloc->r_info = ELF64_R_INFO(renum[pair->symref], R_X86_64_PC32);
 			reloc->r_addend = -4; // e8 @00 00 00 00 $ // you write at @ but the cpu executes the call at $ hence -4
 			// also true for any ins with a disp32 field (and no immediate, otherwise also substract the immediate's width)
 			r_idx++;

@@ -15,15 +15,18 @@ typedef struct gen_reloc { idx_t offset, symref; } gen_reloc;
 typedef struct gen_sym {
 	union {
 		struct { idx_t index, size; };
-		scratch_arr ins; // bytes
+		struct {
+			scratch_arr ins; // bytes
+			scratch_arr refs; // array of gen_reloc lo=offset in symbol, hi=referenced index
+		};
 	};
-	scratch_arr refs; // array of gen_reloc lo=offset in symbol, hi=referenced index
 	enum { GEN_CODE, GEN_RODATA } kind;
 } gen_sym;
 
 typedef struct gen_module {
 	scratch_arr syms;
 	scratch_arr rodata;
+	scratch_arr renum;
 	idx_t code_size;
 	idx_t num_refs;
 } gen_module;
