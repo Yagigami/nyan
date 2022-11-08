@@ -140,12 +140,9 @@ again:
 		assert(*at++ == '/');
 		while (*at != '\n') at++;
 		/* fallthrough */
-	case '\n': 
+	case '\n': case ' ': case '\t': case '\v': case '\r': case '\f':
 		{
-		source_idx line = at - tokens.base;
-		dyn_arr_push(&tokens.line_marks, &line, sizeof line, tokens.up);
-		/* fallthrough */
-	case ' ': case '\t': case '\v': case '\r': case '\f':
+		source_idx line;
 		while (isspace(*at))
 			if (*at++ == '\n') {
 				line = at - tokens.base;

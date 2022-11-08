@@ -58,12 +58,33 @@ static void serialize_initlist(byte *blob, expr *e, type *t, map *e2t, map_stack
 {
 	switch (e->kind) {
 case EXPR_INITLIST:
+	{
 	assert(t->kind == TYPE_ARRAY);
-	assert(scratch_len(t->sizes) == sizeof(expr*) && "not implemented");
-	for (expr **field = scratch_start(e->call.args); field != scratch_end(e->call.args); field++) {
-		serialize_initlist(blob, *field, t->base, e2t, stk);
-		blob += t->base->size;
+	idx_t depth = scratch_len(t->sizes) / sizeof(expr*);
+	typedef struct { expr **at, **end; } iter;
+	allocation m = ALLOC(bytecode.temps, depth * sizeof(iter), alignof(iter));
+	iter *stack = m.addr, *top = stack;
+	*top++ = (iter){ scratch_start(e->call.args), scratch_end(e->call.args) };
+	while (top != stack) {
+		iter *peek = &top[-1];
+		if (peek->at == peek->end) {
+			top--;
+			continue;
+		}
+		idx_t reach = top - stack;
+		if (reach == depth)
+			serialize_initlist(blob, *peek->at, t->base, e2t, stk),
+			blob += t->base->size;
+		else
+			*top++ = (iter){
+				scratch_start(peek->at[0]->call.args),
+				scratch_end  (peek->at[0]->call.args)
+			};
+		peek->at++;
 	}
+	DEALLOC(bytecode.temps, m);
+	}
+	assert(t->kind == TYPE_ARRAY);
 	break;
 case EXPR_INT:
 	// little endian things
@@ -218,13 +239,13 @@ case EXPR_ADDRESS:
 		number = new_local(&f->locals, t);
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ADDRESS, number, name }, sizeof(ssa_instr), a);
 	} else if (sub->kind == EXPR_INDEX) {
-		type *base_t = (type*) map_find(e2t, (key_t) sub->binary.L, intern_hash((key_t) sub->binary.L), intern_cmp)->v;
+		type *base_t = (type*) map_find(e2t, (key_t) sub->call.operand, intern_hash((key_t) sub->call.operand), intern_cmp)->v;
 		assert(base_t->kind == TYPE_ARRAY);
 		ssa_ref base;
-		if (sub->binary.L->kind == EXPR_DEREF) {
-			base = ir3_expr(f, sub->binary.L->unary.operand, e2t, stk, REF_NONE, a);
+		if (sub->call.operand->kind == EXPR_DEREF) {
+			base = ir3_expr(f, sub->call.operand->unary.operand, e2t, stk, REF_NONE, a);
 		} else {
-			ssa_ref arr = ir3_expr(f, sub->binary.L, e2t, stk, REF_NONE, a);
+			ssa_ref arr = ir3_expr(f, sub->call.operand, e2t, stk, REF_NONE, a);
 			base = new_local(&f->locals, t);
 			dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ADDRESS, base, arr }, sizeof(ssa_instr), a);
 		}
@@ -232,8 +253,14 @@ case EXPR_ADDRESS:
 
 		expr **fst_idx = scratch_start(sub->call.args);
 		ssa_ref offset = ir3_expr(f, *fst_idx, e2t, stk, REF_NONE, a);
-		for (; 0; )
-			;
+		for (expr **idx = fst_idx+1, **sz = scratch_start(base_t->sizes) + sizeof *sz; idx != scratch_end(sub->call.args); idx++, sz++) {
+			assert(sz[0]->kind == EXPR_INT);
+			dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_IMM, number }, sizeof(ssa_instr), a);
+			dyn_arr_push(&f->ins, &(ssa_instr){ .v=sz[0]->value }, sizeof(ssa_instr), a);
+			dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_MUL, offset, offset, number }, sizeof(ssa_instr), a);
+			ssa_ref evaluated_idx = ir3_expr(f, *idx, e2t, stk, RVALUE, a);
+			dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ADD, offset, offset, evaluated_idx }, sizeof(ssa_instr), a);
+		}
 
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_IMM, number }, sizeof(ssa_instr), a);
 		dyn_arr_push(&f->ins, &(ssa_instr){ .v=base_t->base->size }, sizeof(ssa_instr), a);
@@ -266,7 +293,8 @@ case EXPR_DEREF:
 case EXPR_INDEX:
 	{
 	ssa_ref base;
-	expr *sub = e->binary.L;
+	expr *sub = e->call.operand;
+	type *sub_t = (type*) map_find(e2t, (key_t) sub, intern_hash((key_t) sub), intern_cmp)->v;
 	if (sub->kind == EXPR_DEREF) {
 		base = ir3_expr(f, sub->unary.operand, e2t, stk, REF_NONE, a);
 	} else {
@@ -280,11 +308,17 @@ case EXPR_INDEX:
 	// &a[x,y,z] = &a + (((z) * Y + y) * X + x) * sizeof(T)
 	expr **fst_idx = scratch_start(e->call.args);
 	ssa_ref offset = ir3_expr(f, *fst_idx, e2t, stk, REF_NONE, a);
-	assert(fst_idx+1 == scratch_end(e->call.args));
-	for (; 0; )
-		;
+	ssa_ref addr = new_local(&f->locals, &type_int64); // also used for scaling
+	assert(sub_t->kind == TYPE_ARRAY);
+	for (expr **idx = fst_idx+1, **sz = scratch_start(sub_t->sizes) + sizeof *sz; idx != scratch_end(e->call.args); idx++, sz++) {
+		assert(sz[0]->kind == EXPR_INT);
+		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_IMM, addr }, sizeof(ssa_instr), a);
+		dyn_arr_push(&f->ins, &(ssa_instr){ .v=sz[0]->value }, sizeof(ssa_instr), a);
+		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_MUL, offset, offset, addr }, sizeof(ssa_instr), a);
+		ssa_ref evaluated_idx = ir3_expr(f, *idx, e2t, stk, RVALUE, a);
+		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ADD, offset, offset, evaluated_idx }, sizeof(ssa_instr), a);
+	}
 
-	ssa_ref addr = new_local(&f->locals, &type_int64);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_IMM, addr }, sizeof(ssa_instr), a);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .v=t->size }, sizeof(ssa_instr), a);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_MUL, addr, addr, offset }, sizeof(ssa_instr), a);

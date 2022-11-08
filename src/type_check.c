@@ -190,15 +190,33 @@ case EXPR_INITLIST:
 			e->pos, "cannot assign to an initializer list.\n")) break;
 	if (!expect_or(expecting->kind == TYPE_ARRAY,
 			e->pos, "can only initialize an array with an initializer list.\n")) break;
-	for (expr **sz = scratch_start(expecting->sizes); sz != scratch_end(expecting->sizes); sz++)
-		for (expr **start = scratch_start(e->call.args), **v = start; v != scratch_end(e->call.args); v++) {
-			assert(sz[0]->kind == EXPR_INT);
-			// FIXME: handle overflow
-			if (!expect_or(0 <= v-start && v-start < (ptrdiff_t)sz[0]->value,
-					v[0]->pos, "trying to assign a value out of bounds of the array.\n")) break;
-			type_check_expr(v, stk, expecting->base, RVALUE, e2t, up, true);
+	idx_t depth = scratch_len(expecting->sizes) / sizeof(expr*);
+	typedef struct { expr **at, **end; } iter;
+	allocation m = ALLOC(types.temps, depth * sizeof(iter), alignof(iter));
+	iter *stack = m.addr, *top = stack;
+	*top++ = (iter){ scratch_start(pe[0]->call.args), scratch_end(pe[0]->call.args) };
+	while (top != stack) {
+		iter *peek = &top[-1];
+		if (peek->at == peek->end) {
+			top--;
+			continue;
 		}
+		idx_t reach = top - stack;
+		expr **sizes = scratch_start(expecting->sizes);
+		if (reach == depth)
+			type_check_expr(peek->at, stk, expecting->base, RVALUE, e2t, up, true);
+		else if (expect_or(reach < depth && sizes[reach]->kind == EXPR_INT && scratch_len(peek->at[0]->call.args) / sizeof(expr*) == sizes[reach]->value,
+					pe[0]->pos, "attempt to assign a value out of bounds of array"))
+			*top++ = (iter){
+				scratch_start(peek->at[0]->call.args),
+				scratch_end  (peek->at[0]->call.args)
+			};
+		else goto fail;
+		peek->at++;
+	}
 	t = expecting;
+fail:
+	DEALLOC(types.temps, m);
 	break;
 	}
 
@@ -278,6 +296,8 @@ case EXPR_INDEX:
 	type *base  = type_check_expr(&e->call.operand, stk, &type_none, RVALUE, e2t, up, eval);
 	if (!expect_or(base->kind == TYPE_ARRAY,
 			e->pos, "attempt to index something that does not support indexing.\n")) break;
+	if (!expect_or(scratch_len(e->call.args) == scratch_len(base->sizes),
+			e->pos, "mismatch between the number of indices and the dimension of the array.\n")) break;
 	for (expr **idx = scratch_start(e->call.args); idx != scratch_end(e->call.args); idx++) {
 		type *ti = type_check_expr(idx, stk, &type_int64, RVALUE, e2t, up, eval);
 		assert(ti == &type_int64);
