@@ -46,7 +46,6 @@ static expr *parse_expr_add(allocator *up);
 static type *parse_type(allocator *up);
 static type *parse_type_prim(allocator *up);
 static type *parse_type_target(type *base, allocator *up);
-static void parse_type_params(dyn_arr *p, allocator *up);
 
 typedef struct {
 	decl *ptr;
@@ -264,24 +263,21 @@ expr *parse_expr(allocator *up)
 	} else return parse_expr_cvt(up);
 }
 
-void parse_type_params(dyn_arr *p, allocator *up)
+static decl parse_decl_unset(allocator *up)
 {
-	if (!token_expect('(')) return;
-	size_t i=0;
-	while (!token_match(')')) {
-		if (i++ && !token_expect(',')) return;
-		ident_t name = tokens.current.processed;
-		if (!token_expect(TOKEN_NAME)) return;
-		if (!token_expect(':')) return;
-		func_arg *a = dyn_arr_push(p, NULL, sizeof *a, ast.temps);
-		a->name = name;
-		a->type = parse_type(up);
-	}
+	decl d = { .kind=DECL_NONE, .name=tokens.current.processed, .pos=tokens.current.pos };
+	if (!token_expect(TOKEN_NAME)) goto err;
+	if (!token_expect(':')) goto err;
+	d.type = parse_type(up);
+	d.kind = DECL_UNSET;
+err:
+	return d;
 }
 
 type *parse_type_prim(allocator *up)
 {
 	type *prim;
+	token snapshot = tokens.current;
 	if (token_match_kw(tokens.kw_func)) {
 		prim = new_type(up);
 		prim->kind = TYPE_FUNC;
@@ -293,6 +289,10 @@ type *parse_type_prim(allocator *up)
 		prim = &type_int64;
 	} else if (token_match_kw(tokens.kw_bool)) {
 		prim = &type_bool;
+	} else if (token_match(TOKEN_NAME)) {
+		prim = new_type(up);
+		prim->kind = TYPE_NAME;
+		prim->name = snapshot.processed;
 	} else {
 		if (!expect_or(false, token_pos(), "unknown type ", tokens.current, "\n"))
 			token_skip_to_newline();
@@ -333,8 +333,14 @@ type *parse_type(allocator *up)
 	t = parse_type_target(t, up);
 	if (t->kind == TYPE_FUNC) {
 		dyn_arr params;
-		dyn_arr_init(&params, 0*sizeof(func_arg), ast.temps);
-		parse_type_params(&params, up);
+		dyn_arr_init(&params, 0*sizeof(decl), ast.temps);
+		if (!token_expect('(')) goto err;
+		size_t i=0;
+		while (!token_match(')')) {
+			if (i++ && !token_expect(',')) goto err;
+			decl param = parse_decl_unset(up);
+			dyn_arr_push(&params, &param, sizeof param, ast.temps);
+		}
 		if (!token_expect(':')) {
 			dyn_arr_fini(&params, ast.temps);
 			goto err;
@@ -416,18 +422,15 @@ decl_idx parse_decl(allocator *up)
 			if (!token_expect('{')) goto err;
 			dyn_arr fields; dyn_arr_init(&fields, 0, ast.temps);
 			while (!token_match('}')) {
-				ident_t name = tokens.current.processed;
-				if (!token_expect(TOKEN_NAME)) goto err;
-				if (!token_expect(':')) goto err;
-				func_arg *field = dyn_arr_push(&fields, NULL, sizeof *field, ast.temps);
-				field->name = name;
-				field->type = parse_type(up);
+				decl field = parse_decl_unset(up);
 				if (!token_expect(';')) goto err;
+				dyn_arr_push(&fields, &field, sizeof field, ast.temps);
 			}
 			d->kind = DECL_STRUCT;
 			d->type = new_type(up);
 			d->type->kind = TYPE_STRUCT;
 			d->type->params = scratch_from(&fields, ast.temps, up);
+			d->type->name = d->name;
 			return pair.i;
 		}
 		d->kind = DECL_VAR;
@@ -435,13 +438,13 @@ decl_idx parse_decl(allocator *up)
 		if (!expect_or(d->type->kind != TYPE_FUNC,
 			d->pos, "function types are not prefixed by ':'.\n")) goto err;
 		if (!token_expect('=')) goto err;
-		d->var_d.init = parse_expr(up);
+		d->init = parse_expr(up);
 		if (!token_expect(';')) goto err;
 		return pair.i;
 	} else if (expect_or((d->type = parse_type(up))->kind == TYPE_FUNC,
 				d->pos, "a function type was expected here.\n")) {
 		d->kind = DECL_FUNC;
-		d->func_d.body = parse_stmt_block(up);
+		d->body = parse_stmt_block(up);
 	} else {
 	err:
 		d->kind = DECL_NONE;
@@ -469,7 +472,7 @@ void test_ast(void)
 	ast_init(gpa);
 	allocator_geom perma;
 	allocator_geom_init(&perma, 16, 8, 0x100, gpa);
-	token_init("nyan/basic.nyan", ast.temps, &perma.base);
+	token_init("nyan/simpler.nyan", ast.temps, &perma.base);
 	module_t module = parse_module(&perma.base);
 	scope global;
 	resolve_refs(module, &global, ast.temps, &perma.base);

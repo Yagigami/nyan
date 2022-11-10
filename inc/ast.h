@@ -23,11 +23,13 @@ typedef enum type_kind {
 	TYPE_INT64,
 	TYPE_PRIMITIVE_END = TYPE_INT64,
 
+	TYPE_NAME,
+	TYPE_STRUCT,
+
 	TYPE_FUNC,
 	TYPE_CHAINED = TYPE_FUNC,
 	TYPE_PTR,
 	TYPE_ARRAY,
-	TYPE_STRUCT,
 	
 	TYPE_NUM
 } type_kind;
@@ -35,6 +37,7 @@ typedef enum type_kind {
 typedef enum decl_kind {
 	DECL_NONE,
 	DECL_VAR,
+	DECL_UNSET,
 	DECL_STRUCT,
 	DECL_FUNC,
 
@@ -76,24 +79,24 @@ struct decl;
 struct stmt;
 struct type;
 
+// TODO: make types unique somehow
 typedef struct type {
-	struct type *base;
+	union {
+		struct type *base;
+		ident_t name;
+	};
 	uint64_t size;
 	union {
-		// func_arg array // also used for  struct
+		// to be honest, types are supposed to be unique
+		// so scratch_arr is just not useful for those
+		// TODO: use dyn_arr instead
+		// decl array // also used for struct
 		scratch_arr params;
 		scratch_arr sizes; // expr(int) * array
 	};
 	type_kind kind;
 	uint32_t align;
 } type;
-
-// FIXME: this is aliased with a `decl` in type_check.c
-// --> find a way to be more precise
-typedef struct func_arg {
-	ident_t name;
-	type *type;
-} func_arg;
 
 // TODO: embed a type* inside or something
 typedef struct expr {
@@ -129,12 +132,9 @@ typedef struct decl {
 	decl_kind kind;
 	source_idx pos;
 	union {
-		struct {
-			expr *init;
-		} var_d;
-		struct {
-			stmt_block body;
-		} func_d;
+		expr *init;
+		stmt_block body;
+		uint64_t offset; // for aggregate fields
 	};
 } decl;
 

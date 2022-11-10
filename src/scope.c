@@ -16,7 +16,7 @@ case EXPR_NAME:
 		name = map_find(&it->scope->refs, e->name, h, intern_cmp);
 		if (name) return;
 	}
-	bool inserted;
+	bool inserted = false;
 	// FIXME: to be honest, I feel like global variables should not be order-independent.
 	// functions? sure. aliases? meh. types? i guess.
 	name = map_id(&it->scope->refs, e->name, intern_hash, intern_cmp, &inserted, up);
@@ -61,16 +61,16 @@ default:
 
 static void resolve_stmt(stmt *s, dyn_arr *add_subscopes, scope_stack_l *list, allocator *up, allocator *final);
 
-static void resolve_func(decl_idx i, dyn_arr *add_subscopes, scope_stack_l *list, allocator *up, allocator *final)
+static void resolve_func(decl *f, dyn_arr *add_subscopes, scope_stack_l *list, allocator *up, allocator *final)
 {
-	decl *f = idx2decl(i);
 	scope *new = dyn_arr_push(add_subscopes, NULL, sizeof *new, up);
 	scope_stack_l top = { .scope=new, .next=list };
 	map_init(&new->refs, 2, up);
-	for (func_arg *arg = scratch_start(f->type->params); arg != scratch_end(f->type->params); arg++) {
+	for (decl *arg = scratch_start(f->type->params); arg != scratch_end(f->type->params); arg++) {
+		assert(arg->kind == DECL_UNSET);
 		if (!expect_or(arg->type->kind != TYPE_FUNC,
 			f->pos, "you cannot pass a function as a value.\n")) continue;
-		bool inserted;
+		bool inserted = false;
 		map_entry *e = map_id(&new->refs, arg->name, intern_hash, intern_cmp, &inserted, up);
 		if (!expect_or(inserted,
 			f->pos, "the symbol ", arg->name, " redefines\n",
@@ -79,47 +79,89 @@ static void resolve_func(decl_idx i, dyn_arr *add_subscopes, scope_stack_l *list
 	}
 
 	dyn_arr subs; dyn_arr_init(&subs, 0, up);
-	stmt_block blk = f->func_d.body;
+	stmt_block blk = f->body;
 	for (stmt **it = scratch_start(blk), **end = scratch_end(blk);
 			it != end; it++)
 		resolve_stmt(*it, &subs, &top, up, final);
 	new->sub = scratch_from(&subs, up, final);
 }
 
-static void resolve_decl(decl_idx i, dyn_arr *add_subscopes, scope_stack_l *list, allocator *up, allocator *final)
+static void resolve_type(type **pt, dyn_arr *add_subscopes, scope_stack_l *list, allocator *up, allocator *final)
 {
-	decl *d = idx2decl(i);
-	bool inserted;
+	type *t = *pt;
+	switch (t->kind) {
+		bool inserted;
+		map_entry *e;
+case TYPE_NONE:
+case TYPE_BOOL:
+case TYPE_INT8:
+case TYPE_INT32:
+case TYPE_INT64:
+	// no-op
+	break;
+case TYPE_FUNC:
+	for (decl *param = scratch_start(t->params); param != scratch_end(t->params); param++)
+		resolve_type(&param->type, add_subscopes, list, up, final);
+	/* fallthrough */
+case TYPE_PTR:
+case TYPE_ARRAY:
+	resolve_type(&t->base, add_subscopes, list, up, final);
+	break;
+case TYPE_STRUCT:
+	break;
+case TYPE_NAME:
+	{
+	size_t h = intern_hash(t->name);
+	if ((e = map_find(&list->scope->refs, t->name, h, intern_cmp))) goto early;
+	while (list->next) {
+		list = list->next;
+		e = map_find(&list->scope->refs, t->name, h, intern_cmp);
+		if (e) goto early;
+	}
+	e = map_id(&list->scope->refs, t->name, intern_hash, intern_cmp, &inserted, up);
+	}
+early:
+	if (e->v) *pt = ((decl*) e->v)->type; 
+	break;
+default:
+	__builtin_unreachable();
+	}
+}
+
+static void resolve_decl(decl *d, dyn_arr *add_subscopes, scope_stack_l *list, allocator *up, allocator *final)
+{
+	bool inserted = false;
 	map_entry *e = map_id(&list->scope->refs, d->name, intern_hash, intern_cmp, &inserted, up);
 	if (!expect_or(inserted || !e->v,
 		d->pos, "the symbol ", d->name, " redefines\n",
-		scope2decl(e->v)->pos  , "in the same scope.\n")) {
+		scope2decl(e->v)->pos, "in the same scope.\n")) {
 		d->kind = DECL_NONE;
 		return;
 	}
 	e->v = (val_t) d;
+	resolve_type(&d->type, add_subscopes, list, up, final);
 	switch (d->kind) {
 	case DECL_VAR:
-		resolve_expr(d->var_d.init, list, up, final);
+		resolve_expr(d->init, list, up, final);
 		break;
 	case DECL_FUNC:
-		resolve_func(i, add_subscopes, list, up, final);
+		resolve_func(d, add_subscopes, list, up, final);
 		break;
 	case DECL_STRUCT:
 		{
 		scope *new = dyn_arr_push(add_subscopes, NULL, sizeof *new, up);
-		// scope_stack_l top = { .scope=new, .next=list };
-		map_init(&new->refs, 2, up);
-		for (func_arg *field = scratch_start(d->type->params); field != scratch_end(d->type->params); field++) {
-			if (!expect_or(field->type->kind != TYPE_FUNC,
-						d->pos, "cannot have a function as member variable.\n")) continue;
-			e = map_id(&new->refs, field->name, intern_hash, intern_cmp, &inserted, up);
-			if (!expect_or(inserted,
-						d->pos, "the symbol ", field->name, " redefines\n",
-						scope2decl(e->v)->pos, "in the same struct.\n")) continue;
-			e->v = (val_t) field; // !!!
+		map_init(&new->refs, 0, up);
+		dyn_arr fields; dyn_arr_init(&fields, 0, up);
+		scope_stack_l top = { .scope=new, .next=list };
+		for (decl *field = scratch_start(d->type->params); field != scratch_end(d->type->params); field++) {
+			if (!expect_or(field->kind == DECL_UNSET,
+						field->pos, "can only have a normal variable as an aggregate field.\n")) continue;
+			resolve_decl(field, &fields, &top, up, final);
 		}
+		new->sub = scratch_from(&fields, up, final);
 		}
+		break;
+	case DECL_UNSET:
 		break;
 	case DECL_NONE:
 		break;
@@ -147,7 +189,7 @@ void resolve_stmt(stmt *s, dyn_arr *add_subscopes, scope_stack_l *list, allocato
 	case STMT_DECL:
 		if (!expect_or(idx2decl(s->d)->kind != DECL_FUNC,
 			idx2decl(s->d)->pos, "the function is nested, which is disallowed.\n")) return;
-		resolve_decl(s->d, add_subscopes, list, up, final);
+		resolve_decl(idx2decl(s->d), add_subscopes, list, up, final);
 		break;
 	case STMT_ASSIGN:
 		resolve_expr(s->assign.L, list, up, final);
@@ -188,7 +230,7 @@ void resolve_refs(module_t of, scope *to, allocator *up, allocator *final)
 	for (decl_idx *it = start; it != end; it++) {
 		decl *d = idx2decl(*it);
 		if (!expect_or(d->kind != DECL_VAR, "global variables not implemented.\n")) continue;
-		resolve_decl(*it, &sub, &list, up, final);
+		resolve_decl(d, &sub, &list, up, final);
 	}
 	for (map_entry *start = list.scope->refs.m.addr, *end = list.scope->refs.m.addr + list.scope->refs.m.size,
 			*e = start; e != end; e++) {

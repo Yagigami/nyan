@@ -1,3 +1,28 @@
+i2: struct
+{
+	a: int8 ;
+	b: int32;
+}
+
+scoping func(): int32
+{
+	a: int32 = 1;
+	if (a == 2) {
+		if (a == 1) {
+			if (a == 3) {
+				b: int32 = 5;
+				return b;
+			} else {
+				return 6;
+			}
+		} else {
+			return 4;
+		}
+	} else {
+		return 3;
+	}
+}
+
 smol func(): int32
 {
 	b: int8*[1] = undef;

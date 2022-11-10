@@ -160,6 +160,7 @@ static int fprint_newline(FILE *to)
 }
 
 static int fprint_expr(FILE *to, expr *e);
+static int fprint_decl(FILE *to, decl *d);
 
 static int fprint_type(FILE *to, type *t)
 {
@@ -189,11 +190,18 @@ case TYPE_ARRAY:
 case TYPE_FUNC:
 	prn += fprintf(to, "type_func(");
 	prn += fprint_type(to, t->base);
-	for (func_arg *param = scratch_start(t->params); param != scratch_end(t->params); param++) {
-		prn += fprintf(to, "{ n=%.*s t=", (int) ident_len(param->name), ident_str(param->name));
-		prn += fprint_type(to, param->type);
-		prn += fprintf(to, "}, ");
+	for (decl *param = scratch_start(t->params); param != scratch_end(t->params); param++) {
+		prn += fprint_decl(to, param);
 	}
+	prn += fprintf(to, ")");
+	break;
+case TYPE_NAME:
+	prn += fprintf(to, "type_name(%.*s)", (int) ident_len(t->name), ident_str(t->name));
+	break;
+case TYPE_STRUCT:
+	prn += fprintf(to, "type_struct(");
+	for (decl *field = scratch_start(t->params); field != scratch_end(t->params); field++)
+		fprint_decl(to, field);
 	prn += fprintf(to, ")");
 	break;
 default:
@@ -325,7 +333,6 @@ default:
 }
 
 static int fprint_stmt_block(FILE *to, stmt_block blk);
-static int fprint_decl(FILE *to, decl *d);
 
 static int fprint_stmt(FILE *to, stmt *s)
 {
@@ -408,15 +415,26 @@ case DECL_VAR:
 	prn += fprintf(to, "decl_var(n=%.*s t=", (int) ident_len(d->name), ident_str(d->name));
 	prn += fprint_type(to, d->type);
 	prn += fprintf(to, " v=");
-	prn += fprint_expr(to, d->var_d.init);
+	prn += fprint_expr(to, d->init);
 	prn += fprintf(to, ")");
 	break;
 case DECL_FUNC:
-	prn += fprintf(to, "decl_func(n=%*s t=", (int) ident_len(d->name), ident_str(d->name));
+	prn += fprintf(to, "decl_func(n=%.*s t=", (int) ident_len(d->name), ident_str(d->name));
 	prn += fprint_type(to, d->type);
 	prn += fprint_newline(to);
-	prn += fprint_stmt_block(to, d->func_d.body);
+	prn += fprint_stmt_block(to, d->body);
 	prn += fprintf(to, ")");
+	break;
+case DECL_UNSET:
+	prn += fprintf(to, "{ n=%.*s t=", (int) ident_len(d->name), ident_str(d->name));
+	prn += fprint_type(to, d->type);
+	prn += fprintf(to, "}, ");
+	break;
+case DECL_STRUCT:
+	prn += fprintf(to, "decl_struct(n=%.*s t=", (int) ident_len(d->name), ident_str(d->name));
+	prn += fprint_type(to, d->type);
+	prn += fprintf(to, ")");
+	prn += fprint_newline(to);
 	break;
 default:
 	prn += fprintf(to, "decl_unknown");

@@ -67,6 +67,7 @@ map_entry *map_id(map *map, key_t k, map_hash hash, map_cmp cmp, bool *inserted,
 		map_entry *e = map->m.addr + i*sizeof *e;
 		if (!e->k) {
 			e->k = k; // you can always overwrite this later if you need special functionality
+			e->v = 0;
 			*inserted = true;
 			map->cnt++;
 			return map_rehash_if_needed(map, e, hash, a);

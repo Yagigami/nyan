@@ -9,6 +9,12 @@ static struct type_checker_state {
 	allocator *temps;
 } types;
 
+typedef struct scope_iter {
+	scope *scope;
+	scope *sub;
+	struct scope_iter *next;
+} scope_iter;
+
 // TODO: use an intern map
 static bool same_type(const type *L, const type *R)
 {
@@ -63,11 +69,15 @@ static bool compatible_type_weak(const type *test, const type *ref, const expr *
 	return same_type(test, ref);
 }
 
-static type *type_check_expr(expr **e, scope_stack_l *stk, type *expecting, value_category c, map *e2t, allocator *up, bool eval);
+static type *type_check_expr(expr **e, scope_iter *stk, type *expecting, value_category c, map *e2t, allocator *up, bool eval);
 
-void complete_type(type *t, scope_stack_l *stk, map *e2t, allocator *up)
+// FIXME: this function is everywhere -> make that cleaner
+static size_t align(size_t offset, size_t align) { return (offset + align - 1) / align * align; }
+
+void complete_type(type *t, scope_iter *stk, map *e2t, allocator *up)
 {
 	if (t->size != (uint64_t)-1) return;
+	if (!expect_or(t->size != (uint64_t)-2, "<type pos>", "circular dependency in type.\n")) return;
 	switch (t->kind) {
 case TYPE_ARRAY:
 	complete_type(t->base, stk, e2t, up);
@@ -79,26 +89,44 @@ case TYPE_ARRAY:
 		t->size *= sz[0]->value;
 	}
 	break;
+
 case TYPE_PTR:
-	complete_type(t->base, stk, e2t, up);
 	t->size = 8;
 	t->align = 8;
 	break;
+
 case TYPE_FUNC:
-	{
-	for (func_arg *param = scratch_start(t->params); param != scratch_end(t->params); param++)
+	for (decl *param = scratch_start(t->params); param != scratch_end(t->params); param++)
 		complete_type(param->type, stk, e2t, up);
 	complete_type(t->base, stk, e2t, up);
 	t->align = 1;
 	t->size = 0;
 	break;
+
+case TYPE_STRUCT:
+	{
+	scope_iter top = { .scope=stk->sub, .sub=scratch_start(stk->sub->sub), .next=stk };
+	stk->sub++;
+	t->size = (uint64_t)-2;
+	uint64_t offset = 0;
+	uint32_t alignment = 1;
+	for (decl *field = scratch_start(t->params); field != scratch_end(t->params); field++) {
+		complete_type(field->type, &top, e2t, up);
+		field->offset = offset = align(offset, field->type->align);
+		if (alignment < field->type->align) alignment = field->type->align;
+		offset += field->type->size;
 	}
+	t->size = align(offset, alignment);
+	t->align = alignment;
+	break;
+	}
+
 default:
 	__builtin_unreachable();
 	}
 }
 
-type *type_check_expr(expr **pe, scope_stack_l *stk, type *expecting, value_category c, map *e2t, allocator *up, bool eval)
+type *type_check_expr(expr **pe, scope_iter *stk, type *expecting, value_category c, map *e2t, allocator *up, bool eval)
 {
 	expr *e = *pe;
 	type *t = &type_none;
@@ -245,10 +273,10 @@ case EXPR_CALL:
 			e->pos, "attempt to call a non-callable:\n")) break;
 	scratch_arr params = operand->params;
 	expr **arg = scratch_start(e->call.args);
-	if (!expect_or(scratch_len(e->call.args) / sizeof(expr*) == scratch_len(params) / sizeof(func_arg),
+	if (!expect_or(scratch_len(e->call.args) / sizeof(expr*) == scratch_len(params) / sizeof(decl),
 			e->pos, "function call with the wrong number of arguments provided.\n"))
 		break;
-	for (func_arg *param = scratch_start(params); param != scratch_end(params); param++, arg++)
+	for (decl *param = scratch_start(params); param != scratch_end(params); param++, arg++)
 		type_check_expr(arg, stk, param->type, RVALUE, e2t, up, eval);
 	t = operand->base;
 	break;
@@ -342,68 +370,71 @@ default:
 	return t;
 }
 
-static void type_check_decl(decl_idx i, scope *sc, scope_stack_l *stk, map *e2t, allocator *up);
-static void type_check_stmt_block(stmt_block blk, type *surrounding, scope *sc, scope_stack_l *stk,
+static void type_check_decl(decl_idx i, scope_iter *stk, map *e2t, allocator *up);
+static void type_check_stmt_block(stmt_block blk, type *surrounding, scope_iter *stk,
 		map *e2t, allocator *up);
 
-static scope *type_check_stmt(stmt *s, type *surrounding, scope *sc, scope_stack_l *stk,
+static void type_check_stmt(stmt *s, type *surrounding, scope_iter *stk,
 		map *e2t, allocator *up)
 {
 	switch (s->kind) {
 	case STMT_EXPR:
 		type_check_expr(&s->e, stk, &type_none, RVALUE, e2t, up, false);
-		return sc;
+		break;
 	case STMT_ASSIGN:
 		type_check_expr(&s->assign.R, stk,
 				type_check_expr(&s->assign.L, stk, &type_none, LVALUE, e2t, up, false),
 				RVALUE, e2t, up, false);
-		return sc;
+		break;
 	case STMT_DECL:
-		type_check_decl(s->d, sc, stk, e2t, up);
-		return sc;
+		type_check_decl(s->d, stk, e2t, up);
+		break;
 	case STMT_RETURN:
 		type_check_expr(&s->e, stk, surrounding, RVALUE, e2t, up, false);
-		return sc;
+		break;
 	case STMT_IFELSE:
 		type_check_expr(&s->ifelse.cond, stk, &type_bool, RVALUE, e2t, up, false);
-		sc = type_check_stmt(s->ifelse.s_then, surrounding, sc, stk, e2t, up);
+		type_check_stmt(s->ifelse.s_then, surrounding, stk, e2t, up);
 		if (s->ifelse.s_else)
-			sc = type_check_stmt(s->ifelse.s_else, surrounding, sc, stk, e2t, up);
-		return sc;
+			type_check_stmt(s->ifelse.s_else, surrounding, stk, e2t, up);
+		break;
 	case STMT_WHILE:
 		type_check_expr(&s->ifelse.cond, stk, &type_bool, RVALUE, e2t, up, false);
-		return type_check_stmt(s->ifelse.s_then, surrounding, sc, stk, e2t, up);
+		type_check_stmt(s->ifelse.s_then, surrounding, stk, e2t, up);
+		break;
 	case STMT_NONE:
-		return sc;
+		break;
 	case STMT_BLOCK:
-		type_check_stmt_block(s->blk, surrounding, sc, stk, e2t, up);
-		return sc + 1;
+		type_check_stmt_block(s->blk, surrounding, stk, e2t, up);
+		break;
 	default:
 		assert(0);
 	}
 }
 
-void type_check_stmt_block(stmt_block blk, type *surrounding, scope *sc, scope_stack_l *stk,
-		map *e2t, allocator *up)
+void type_check_stmt_block(stmt_block blk, type *surrounding, scope_iter *stk, map *e2t, allocator *up)
 {
-	scope_stack_l top = { .scope=sc, .next=stk };
-	scope *sub = scratch_start(sc->sub);
+	scope_iter top = { .scope=stk->sub, .sub=scratch_start(stk->sub->sub), .next=stk };
 	for (stmt **it = scratch_start(blk), **end = scratch_end(blk);
-			it != end; it++) {
-		sub = type_check_stmt(*it, surrounding, sub, &top, e2t, up);
-	}
+			it != end; it++)
+		type_check_stmt(*it, surrounding, &top, e2t, up);
+	stk->sub++;
 }
 
-void type_check_decl(decl_idx i, scope *sc, scope_stack_l *stk, map *e2t, allocator *up)
+void type_check_decl(decl_idx i, scope_iter *stk, map *e2t, allocator *up)
 {
 	decl *d = idx2decl(i);
 	complete_type(d->type, stk, e2t, up);
 	switch (d->kind) {
 	case DECL_VAR:
-		type_check_expr(&d->var_d.init, stk, d->type, RVALUE, e2t, up, false);
+		type_check_expr(&d->init, stk, d->type, RVALUE, e2t, up, false);
 		break;
 	case DECL_FUNC:
-		type_check_stmt_block(d->func_d.body, d->type->base, sc, stk, e2t, up);
+		// TODO: not much to do with parameters yet? well at least complete the types...
+		type_check_stmt_block(d->body, d->type->base, stk, e2t, up);
+		break;
+	case DECL_STRUCT:
+		// no-op // a struct doesnt have runtime expressions for now
 		break;
 	case DECL_NONE:
 		break;
@@ -412,15 +443,13 @@ void type_check_decl(decl_idx i, scope *sc, scope_stack_l *stk, map *e2t, alloca
 	}
 }
 
-void type_check(module_t module, scope *top, map *expr2type, allocator *up)
+void type_check(module_t module, scope *global, map *expr2type, allocator *up)
 {
 	map_init(expr2type, 0, types.temps);
-	decl_idx *decl_it = scratch_start(module)  , *decl_end = scratch_end(module   );
-	scope *scope_it   = scratch_start(top->sub), *scope_end = scratch_end(top->sub);
-	assert(decl_end - decl_it == scope_end - scope_it);
-	scope_stack_l bottom = { .scope=top, .next=NULL };
-	for (; decl_it != decl_end; decl_it++, scope_it++)
-		type_check_decl(*decl_it, scope_it, &bottom, expr2type, up);
+	decl_idx *decl_it = scratch_start(module)  , *decl_end = scratch_end(module);
+	scope_iter bottom = { .scope=global, .sub=scratch_start(global->sub), .next=NULL };
+	for (; decl_it != decl_end; decl_it++)
+		type_check_decl(*decl_it, &bottom, expr2type, up);
 	print(stdout, (print_acquire_e2t){ expr2type });
 	ast_dump(module);
 }

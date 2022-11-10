@@ -10,6 +10,8 @@
 // k is nonnull on a valid kay, and null on a sentinel key
 // v can be anything
 typedef intptr_t key_t, val_t;
+// TODO: split the values from the keys to allow arbitrary sized values
+// the only place in map.c that cares about values' size is on rehash
 typedef struct map_entry {
 	key_t k;
 	val_t v;

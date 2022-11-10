@@ -384,13 +384,13 @@ static void ir3_decl(ir3_func *f, decl_idx i, map *e2t, map_stack *stk, allocato
 	switch (d->kind) {
 case DECL_VAR:
 	{
-	ssa_ref val = ir3_expr(f, d->var_d.init, e2t, stk, REF_NONE, a);
+	ssa_ref val = ir3_expr(f, d->init, e2t, stk, REF_NONE, a);
 	assert(!map_find(&stk->ast2num, d->name, intern_hash(d->name), intern_cmp));
 	map_entry *e = map_add(&stk->ast2num, d->name, intern_hash, a);
 	e->k = d->name;
-	map_entry *init_entry = map_find(e2t, (key_t) d->var_d.init, intern_hash((key_t) d->var_d.init), intern_cmp); assert(init_entry);
+	map_entry *init_entry = map_find(e2t, (key_t) d->init, intern_hash((key_t) d->init), intern_cmp); assert(init_entry);
 	type *init_type = (type*) init_entry->v;
-	if (d->var_d.init->kind == EXPR_NAME || d->type->kind != init_type->kind) {
+	if (d->init->kind == EXPR_NAME || d->type->kind != init_type->kind) {
 		ssa_ref number = new_local(&f->locals, d->type);
 		e->v = number;
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_COPY, number, val }, sizeof(ssa_instr), a);
@@ -544,7 +544,7 @@ static void ir3_decl_func(ir3_func *f, decl *d, map *e2t, map_stack *stk, scope*
 	scope *sub = scratch_start(fsc[0]->sub);
 	map_stack top = { .scope=(*fsc)++, .next=stk };
 	map_init(&top.ast2num, 0, a);
-	for (func_arg *start = scratch_start(d->type->params), *arg = start; arg != scratch_end(d->type->params); arg++) {
+	for (decl *start = scratch_start(d->type->params), *arg = start; arg != scratch_end(d->type->params); arg++) {
 		map_entry *e = map_add(&top.ast2num, arg->name, intern_hash, a);
 		e->k = arg->name;
 		e->v = arg - start;
@@ -553,7 +553,7 @@ static void ir3_decl_func(ir3_func *f, decl *d, map *e2t, map_stack *stk, scope*
 		// no real constraint for both to be the same
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ARG, arg - start, arg - start }, sizeof(ssa_instr), a);
 	}
-	for (stmt **iter = scratch_start(d->func_d.body), **end = scratch_end(d->func_d.body); iter != end; iter++) {
+	for (stmt **iter = scratch_start(d->body), **end = scratch_end(d->body); iter != end; iter++) {
 		ir3_stmt(f, *iter, e2t, &top, &sub, a);
 	}
 	map_fini(&top.ast2num, a);
@@ -580,19 +580,20 @@ ir3_module convert_to_3ac(module_t ast, scope *enclosing, map *e2t, allocator *a
 {
 	map_stack bottom = { .scope=enclosing, .next=NULL };
 	map_init(&bottom.ast2num, 0, a);
+	// TODO: maybe incorporate fsc in the stack
 	scope *fsc = scratch_start(enclosing->sub);
 	for (decl_idx *start = scratch_start(ast), *end = scratch_end(ast),
 			*iter = start; iter != end; iter++) {
 		decl *d = idx2decl(*iter);
-		assert(d->kind == DECL_FUNC);
 		map_entry *e = map_add(&bottom.ast2num, d->name, intern_hash, a);
 		e->k = d->name;
 		e->v = bytecode.cur_idx = dyn_arr_size(&bytecode.blob) / sizeof(ir3_sym);
-		map_entry global = global_name(d->name, ident_len(d->name), a);
-		dyn_arr_push(&bytecode.names, &global, sizeof global, a);
 		ir3_sym sym;
+		assert(d->kind == DECL_FUNC);
 		sym.kind = IR3_FUNC;
 		ptrdiff_t offset = dyn_arr_push(&bytecode.blob, &sym, sizeof sym, bytecode.temps) - bytecode.blob.buf.addr;
+		map_entry global = global_name(d->name, ident_len(d->name), a);
+		dyn_arr_push(&bytecode.names, &global, sizeof global, a);
 		ir3_decl_func(&sym.f, d, e2t, &bottom, &fsc, a);
 		memcpy(bytecode.blob.buf.addr + offset, &sym.f, sizeof sym.f);
 		// TODO: mmap trickery to reduce the need to copy potentially large amounts of data
