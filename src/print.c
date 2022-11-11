@@ -428,7 +428,7 @@ case DECL_FUNC:
 case DECL_UNSET:
 	prn += fprintf(to, "{ n=%.*s t=", (int) ident_len(d->name), ident_str(d->name));
 	prn += fprint_type(to, d->type);
-	prn += fprintf(to, "}, ");
+	prn += fprintf(to, " }, ");
 	break;
 case DECL_STRUCT:
 	prn += fprintf(to, "decl_struct(n=%.*s t=", (int) ident_len(d->name), ident_str(d->name));

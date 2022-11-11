@@ -1,5 +1,5 @@
-#ifndef NYAN_SSA_H
-#define NYAN_SSA_H
+#ifndef NYAN_3AC_H
+#define NYAN_3AC_H
 
 #include <stdint.h>
 #include <assert.h>
@@ -72,8 +72,9 @@ typedef struct ir3_sym {
 	union {
 		ir3_func f;
 		struct { allocation m; size_t align; };
+		map layout;
 	};
-	enum { IR3_FUNC, IR3_BLOB } kind;
+	enum { IR3_FUNC, IR3_BLOB, IR3_AGGREG } kind;
 } ir3_sym;
 
 typedef scratch_arr ir3_module;
@@ -85,5 +86,5 @@ void bytecode_fini(void);
 
 int dump_3ac(ir3_module m, map_entry *globals);
 
-#endif /* NYAN_SSA_H */
+#endif /* NYAN_3AC_H */
 

@@ -526,8 +526,9 @@ gen_module gen_x86_64(ir3_module m2ac, allocator *a)
 	idx_t objsym = 1;
 	for (ir3_sym *prev = scratch_start(m2ac), *end = scratch_end(m2ac);
 			prev != end; prev++) {
-		gen_sym *new = dyn_arr_push(&dest, NULL, sizeof *new, a);
+		idx_t *idx = dyn_arr_push(&renum, NULL, sizeof *idx, a);
 		if (prev->kind == IR3_BLOB) {
+			gen_sym *new = dyn_arr_push(&dest, NULL, sizeof *new, a);
 			idx_t at = dyn_arr_size(&rodata);
 			idx_t aligned = (at + prev->align - 1) / prev->align * prev->align;
 			idx_t padding = aligned - at;
@@ -536,14 +537,15 @@ gen_module gen_x86_64(ir3_module m2ac, allocator *a)
 			new->kind = GEN_RODATA;
 			new->index = aligned;
 			new->size = prev->m.size;
-			dyn_arr_push(&renum, &objsym, sizeof objsym, a);
-			objsym++;
-		} else if (prev->kind == IR3_FUNC){
+			*idx = objsym++;
+		} else if (prev->kind == IR3_FUNC) {
+			gen_sym *new = dyn_arr_push(&dest, NULL, sizeof *new, a);
 			new->kind = GEN_CODE;
 			out.code_size += gen_symbol(new, &prev->f, a);
 			out.num_refs  += scratch_len(new->refs) / sizeof(gen_reloc);
-			dyn_arr_push(&renum, &objsym, sizeof objsym, a);
-			objsym++;
+			*idx = objsym++;
+		} else if (prev->kind == IR3_AGGREG) {
+			*idx = -1;
 		} else
 			__builtin_unreachable();
 	}

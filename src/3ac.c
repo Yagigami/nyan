@@ -589,13 +589,19 @@ ir3_module convert_to_3ac(module_t ast, scope *enclosing, map *e2t, allocator *a
 		e->k = d->name;
 		e->v = bytecode.cur_idx = dyn_arr_size(&bytecode.blob) / sizeof(ir3_sym);
 		ir3_sym sym;
-		assert(d->kind == DECL_FUNC);
-		sym.kind = IR3_FUNC;
-		ptrdiff_t offset = dyn_arr_push(&bytecode.blob, &sym, sizeof sym, bytecode.temps) - bytecode.blob.buf.addr;
+		if (d->kind == DECL_STRUCT) {
+			sym.kind = IR3_AGGREG;
+			sym.layout = fsc++->refs;
+			dyn_arr_push(&bytecode.blob, &sym, sizeof sym, bytecode.temps);
+			continue;
+		}
 		map_entry global = global_name(d->name, ident_len(d->name), a);
 		dyn_arr_push(&bytecode.names, &global, sizeof global, a);
+		assert(d->kind == DECL_FUNC);
+		sym.kind = IR3_FUNC;
+		ptrdiff_t offset = dyn_arr_push(&bytecode.blob, NULL, sizeof sym, bytecode.temps) - bytecode.blob.buf.addr;
 		ir3_decl_func(&sym.f, d, e2t, &bottom, &fsc, a);
-		memcpy(bytecode.blob.buf.addr + offset, &sym.f, sizeof sym.f);
+		memcpy(bytecode.blob.buf.addr + offset, &sym, sizeof sym);
 		// TODO: mmap trickery to reduce the need to copy potentially large amounts of data
 	}
 	ir3_module out = scratch_from(&bytecode.blob, bytecode.temps, a);
@@ -662,9 +668,9 @@ ir3_module convert_to_2ac(ir3_module m3ac, allocator *a)
 {
 	dyn_arr m2ac; dyn_arr_init(&m2ac, 0, a);
 	for (ir3_sym *src = scratch_start(m3ac); src != scratch_end(m3ac); src++) {
-		if (src->kind == IR3_BLOB) {
+		if (src->kind == IR3_BLOB || src->kind == IR3_AGGREG) {
 			dyn_arr_push(&m2ac, src, sizeof *src, a);
-		} else {
+		} else if (src->kind == IR3_FUNC) {
 			ir3_sym *dst = dyn_arr_push(&m2ac, NULL, sizeof *dst, a);
 			dst->kind = IR3_FUNC;
 			ir2_decl_func(&dst->f, &src->f, a);
@@ -679,7 +685,7 @@ static void ir3_fini(ir3_module m, allocator *a)
 	for (ir3_sym *f = scratch_start(m); f != scratch_end(m); f++) {
 		if (f->kind == IR3_BLOB) {
 			DEALLOC(a, f->m);
-		} else {
+		} else if (f->kind == IR3_FUNC) {
 			dyn_arr_fini(&f->f.ins, a);
 			dyn_arr_fini(&f->f.nodes, a);
 			dyn_arr_fini(&f->f.locals, a);
@@ -711,15 +717,16 @@ void test_3ac(void)
 		bytecode_init(gpa);
 		ir3_module m3ac = convert_to_3ac(module, &global, &e2t, gpa);
 		map_fini(&e2t, gpa);
-		map_fini(&tokens.idents, tokens.up);
-		scope_fini(&global, ast.temps);
-		allocator_geom_fini(&perma);
 
 		print(stdout, "3-address code:\n");
 		dump_3ac(m3ac, bytecode.names.buf.addr);
 		ir3_module m2ac = convert_to_2ac(m3ac, gpa);
-		print(stdout, "2-address code:\n");
+		// print(stdout, "2-address code:\n");
 		// dump_3ac(m2ac, bytecode.names.buf.addr);
+
+		map_fini(&tokens.idents, tokens.up);
+		scope_fini(&global, ast.temps);
+		allocator_geom_fini(&perma);
 
 		gen_module gen = gen_x86_64(m2ac, gpa);
 		allocator_geom_fini(&just_ast);
@@ -741,17 +748,26 @@ void test_3ac(void)
 int dump_3ac(ir3_module m, map_entry *globals)
 {
 	int printed = 0;
-	assert(scratch_len(m) / sizeof(ir3_sym) == dyn_arr_size(&bytecode.names) / sizeof(map_entry));
+	// assert(scratch_len(m) / sizeof(ir3_sym) == dyn_arr_size(&bytecode.names) / sizeof(map_entry));
 	for (ir3_sym *start = scratch_start(m), *end = scratch_end(m),
-			*f = start; f != end; f++, globals++) {
+			*f = start; f != end; f++) {
 		printed += print(stdout, "sym.", (print_int){ f-start }, " ", (char*) globals->k);
 		if (f->kind == IR3_FUNC) {
 			printed += print(stdout, " func:\n", &f->f);
-		} else {
+			globals++;
+		} else if (f->kind == IR3_BLOB) {
 			printed += print(stdout, " blob:\n");
 			for (idx_t i = 0; i < (idx_t) f->m.size; i++)
 				printed += print(stdout, (print_int){ i[(byte*) f->m.addr] }, " ");
-		}
+			globals++;
+		} else if (f->kind == IR3_AGGREG) {
+			printed += print(stdout, " aggregate:\n");
+			map_entry *base = f->layout.m.addr;
+			for (idx_t i = 0; i < (idx_t) (f->layout.m.size / sizeof *base); i++) {
+				if (!base[i].k) continue;
+				printed += print(stdout, "\t", (print_int){ ((decl*) base[i].v)->offset }, ": ", (decl*) base[i].v, "\n");
+			}
+		} else assert(0);
 		printed += print(stdout, "\n\n");
 	}
 	return printed;

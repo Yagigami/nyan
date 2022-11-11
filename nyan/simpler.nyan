@@ -1,5 +1,4 @@
-i2: struct
-{
+i2: struct {
 	a: int8 ;
 	b: int32;
 }

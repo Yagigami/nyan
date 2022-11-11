@@ -43,6 +43,7 @@ typedef enum printable {
 static_assert(P_END < (1<<PRINTABLE_SHIFT), "increase PRINTABLE_SHIFT");
 #define FMT(x) (_Generic((x), \
 			char* /* JUST C THINGS LOL */: P_STRING, \
+			const char* : P_STRING, \
 			ident_t : P_KEYWORD, \
 			source_idx : P_SOURCE_LINE, \
 			print_int : P_INT, \
