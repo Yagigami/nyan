@@ -27,6 +27,7 @@ typedef struct gen_module {
 	scratch_arr syms;
 	scratch_arr rodata;
 	scratch_arr renum;
+	scratch_arr layouts; // [type.%i] = { { offset, size } *tinfo; alloc_size }
 	idx_t code_size;
 	idx_t num_refs;
 } gen_module;

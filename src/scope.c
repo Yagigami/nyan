@@ -51,6 +51,10 @@ case EXPR_INITLIST:
 case EXPR_CONVERT:
 	resolve_expr(e->convert.operand, list, up, final);
 	break;
+case EXPR_FIELD:
+	resolve_expr(e->field.operand, list, up, final);
+	// the rest can only be done at type checking
+	break;
 case EXPR_NONE:
 case EXPR_UNDEF:
 	break;
@@ -86,7 +90,7 @@ static void resolve_func(decl *f, dyn_arr *add_subscopes, scope_stack_l *list, a
 	new->sub = scratch_from(&subs, up, final);
 }
 
-static void resolve_type(type **pt, dyn_arr *add_subscopes, scope_stack_l *list, allocator *up, allocator *final)
+static void resolve_type(type **pt, scope_stack_l *list, allocator *up)
 {
 	type *t = *pt;
 	switch (t->kind) {
@@ -101,13 +105,21 @@ case TYPE_INT64:
 	break;
 case TYPE_FUNC:
 	for (decl *param = scratch_start(t->params); param != scratch_end(t->params); param++)
-		resolve_type(&param->type, add_subscopes, list, up, final);
+		resolve_type(&param->type, list, up);
 	/* fallthrough */
 case TYPE_PTR:
 case TYPE_ARRAY:
-	resolve_type(&t->base, add_subscopes, list, up, final);
+	resolve_type(&t->base, list, up);
 	break;
 case TYPE_STRUCT:
+	for (map_entry *e = t->fields.m.addr, *end = t->fields.m.addr + t->fields.m.size;
+			e != end; e++) {
+		if (!e->k) continue;
+		decl *field = (decl*) (e->v & ~7);
+		if (!expect_or(field->kind == DECL_UNSET,
+					field->pos, "can only have a normal variable as an aggregate field.\n")) continue;
+		resolve_type(&field->type, list, up);
+	}
 	break;
 case TYPE_NAME:
 	{
@@ -122,6 +134,7 @@ case TYPE_NAME:
 	}
 early:
 	if (e->v) *pt = ((decl*) e->v)->type; 
+	// TODO: add pt to a reference table
 	break;
 default:
 	__builtin_unreachable();
@@ -139,7 +152,7 @@ static void resolve_decl(decl *d, dyn_arr *add_subscopes, scope_stack_l *list, a
 		return;
 	}
 	e->v = (val_t) d;
-	resolve_type(&d->type, add_subscopes, list, up, final);
+	resolve_type(&d->type, list, up);
 	switch (d->kind) {
 	case DECL_VAR:
 		resolve_expr(d->init, list, up, final);
@@ -148,18 +161,6 @@ static void resolve_decl(decl *d, dyn_arr *add_subscopes, scope_stack_l *list, a
 		resolve_func(d, add_subscopes, list, up, final);
 		break;
 	case DECL_STRUCT:
-		{
-		scope *new = dyn_arr_push(add_subscopes, NULL, sizeof *new, up);
-		map_init(&new->refs, 0, up);
-		dyn_arr fields; dyn_arr_init(&fields, 0, up);
-		scope_stack_l top = { .scope=new, .next=list };
-		for (decl *field = scratch_start(d->type->params); field != scratch_end(d->type->params); field++) {
-			if (!expect_or(field->kind == DECL_UNSET,
-						field->pos, "can only have a normal variable as an aggregate field.\n")) continue;
-			resolve_decl(field, &fields, &top, up, final);
-		}
-		new->sub = scratch_from(&fields, up, final);
-		}
 		break;
 	case DECL_UNSET:
 		break;

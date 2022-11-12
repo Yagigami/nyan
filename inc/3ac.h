@@ -25,6 +25,8 @@ enum ssa_opcode
 	SSA_CALL, // to = call ext.0 [R args] // +1 ext/4 args
 	SSA_GLOBAL_REF, // `ins.to = ref(ext.v)`
 	SSA_COPY,
+#define COMBINE_TYPE(T, U) ((T)+(U)*TYPE_PRIMITIVE_END)
+	SSA_CONVERT,
 	SSA_RET,
 	SSA_BOOL, // the value is embedded in the L field
 	SSA_LABEL,
@@ -41,6 +43,7 @@ enum ssa_opcode
 	SSA_STORE, SSA_LOAD,
 	SSA_MUL,
 	SSA_MEMCOPY, // dst = memcpy(src)
+	SSA_OFFSETOF, // to = offsetof(T.L, (T.L).R)
 
 	SSA_NUM
 };
@@ -72,7 +75,10 @@ typedef struct ir3_sym {
 	union {
 		ir3_func f;
 		struct { allocation m; size_t align; };
-		map layout;
+		struct {
+			dyn_arr fields; // [%i] = type*
+			type *back;
+		};
 	};
 	enum { IR3_FUNC, IR3_BLOB, IR3_AGGREG } kind;
 } ir3_sym;

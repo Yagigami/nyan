@@ -239,6 +239,7 @@ case EXPR_ADDRESS:
 		number = new_local(&f->locals, t);
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ADDRESS, number, name }, sizeof(ssa_instr), a);
 	} else if (sub->kind == EXPR_INDEX) {
+		// TODO: add sizeof instruction because structs arent complete at this stage
 		type *base_t = (type*) map_find(e2t, (key_t) sub->call.operand, intern_hash((key_t) sub->call.operand), intern_cmp)->v;
 		assert(base_t->kind == TYPE_ARRAY);
 		ssa_ref base;
@@ -363,8 +364,19 @@ case EXPR_CONVERT:
 	assert(rvalue == REF_NONE);
 	ssa_ref from = ir3_expr(f, e->convert.operand, e2t, stk, rvalue, a);
 	number = new_local(&f->locals, t);
-	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_COPY, .to=number, .L=from }, sizeof(ssa_instr), a);
+	type *from_t = from[(type**) f->locals.buf.addr];
+	assert(TYPE_PRIMITIVE_BEGIN <= t->kind && t->kind <= TYPE_PRIMITIVE_END);
+	assert(TYPE_PRIMITIVE_BEGIN <= from_t->kind && from_t->kind <= TYPE_PRIMITIVE_END);
+	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_CONVERT, .to=number, .L=from,
+			.R=COMBINE_TYPE(t->kind, from_t->kind) }, sizeof(ssa_instr), a);
 	break;
+	}
+
+case EXPR_FIELD:
+	if (rvalue == REF_NONE) {
+		assert(0);
+	} else {
+		assert(0);
 	}
 
 case EXPR_UNDEF:
@@ -390,7 +402,8 @@ case DECL_VAR:
 	e->k = d->name;
 	map_entry *init_entry = map_find(e2t, (key_t) d->init, intern_hash((key_t) d->init), intern_cmp); assert(init_entry);
 	type *init_type = (type*) init_entry->v;
-	if (d->init->kind == EXPR_NAME || d->type->kind != init_type->kind) {
+	if (d->init->kind == EXPR_NAME) {
+		assert(init_type->kind == d->type->kind);
 		ssa_ref number = new_local(&f->locals, d->type);
 		e->v = number;
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_COPY, number, val }, sizeof(ssa_instr), a);
@@ -591,7 +604,14 @@ ir3_module convert_to_3ac(module_t ast, scope *enclosing, map *e2t, allocator *a
 		ir3_sym sym;
 		if (d->kind == DECL_STRUCT) {
 			sym.kind = IR3_AGGREG;
-			sym.layout = fsc++->refs;
+			dyn_arr_init(&sym.fields, d->type->fields.cnt * sizeof(type*), a);
+			type **base = sym.fields.buf.addr;
+			for (map_entry *e = d->type->fields.m.addr, *end = d->type->fields.m.addr + d->type->fields.m.size;
+					e != end; e++)
+				if (e->k)
+					dyn_arr_push(&sym.fields, NULL, sizeof(type*), a), 
+					base[e->v & 7] = ((decl*) (e->v & ~7))->type;
+			sym.back = d->type;
 			dyn_arr_push(&bytecode.blob, &sym, sizeof sym, bytecode.temps);
 			continue;
 		}
@@ -632,6 +652,7 @@ static void ir2_decl_func(ir3_func *dst, ir3_func *src, allocator *a)
 		case SSA_BOOL_NEG:
 		case SSA_LOAD: case SSA_STORE: case SSA_ADDRESS:
 		case SSA_MEMCOPY:
+		case SSA_CONVERT:
 			dyn_arr_push(&dst->ins, instr, sizeof *instr, a);
 			break;
 		case SSA_ADD:
@@ -762,11 +783,8 @@ int dump_3ac(ir3_module m, map_entry *globals)
 			globals++;
 		} else if (f->kind == IR3_AGGREG) {
 			printed += print(stdout, " aggregate:\n");
-			map_entry *base = f->layout.m.addr;
-			for (idx_t i = 0; i < (idx_t) (f->layout.m.size / sizeof *base); i++) {
-				if (!base[i].k) continue;
-				printed += print(stdout, "\t", (print_int){ ((decl*) base[i].v)->offset }, ": ", (decl*) base[i].v, "\n");
-			}
+			for (type **start = f->fields.buf.addr, **field = start; field != (type**) f->fields.end; field++)
+				printed += print(stdout, "\t", (print_int){ field - start }, ": ", *field, "\n");
 		} else assert(0);
 		printed += print(stdout, "\n\n");
 	}

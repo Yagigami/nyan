@@ -48,6 +48,8 @@ static int fprint_keyword(FILE *to, ident_t e)
 
 static int fprint_source_line(FILE *to, source_idx offset)
 {
+	if (offset < 0 || offset >= tokens.len)
+		return fprintf(to, "<internal error: out of bounds source index>");
 	source_idx line = find_line(offset);
 	source_idx *idx_start = tokens.line_marks.buf.addr + line*sizeof *idx_start;
 	const char *start = token_source(*idx_start);
@@ -101,8 +103,8 @@ static int fprint_ir3_instr(FILE *to, const ssa_instr *i, int *extra_offset, con
 	case SSA_RET: return fprintf(to, "ret %%%hhx\n", i->to);
 	case SSA_GOTO: return fprintf(to, "goto L%hhx\n", i->to);
 	case SSA_LABEL: return fprintf(to, "label L%hhx\n", i->to);
-	case SSA_COPY: return fprintf(to, "%%%hhx:%s = %%%hhx:%s\n", i->to, T, i->L, type2s[tinfo[i->L - i->to]->kind]);
 	case SSA_BOOL: return fprintf(to, "%%%hhx:%s = %db\n", i->to, T, i->L);
+	case SSA_COPY: return fprintf(to, "%%%hhx:%s = %%%hhx\n", i->to, T, i->L);
 	case SSA_ARG: return fprintf(to, "%%%hhx:%s = args.%hhx\n", i->to, T, i->L);
 	case SSA_LOAD: return fprintf(to, "%%%hhx:%s = load %%%hhx\n", i->to, T, i->L);
 	case SSA_STORE: return fprintf(to, "store:%s %%%hhx, %%%hhx\n", T, i->to, i->L);
@@ -112,6 +114,7 @@ static int fprint_ir3_instr(FILE *to, const ssa_instr *i, int *extra_offset, con
 	case SSA_ADD: return fprintf(to, "%%%hhx:%s = add %%%hhx, %%%hhx\n", i->to, T, i->L, i->R);
 	case SSA_SUB: return fprintf(to, "%%%hhx:%s = sub %%%hhx, %%%hhx\n", i->to, T, i->L, i->R);
 	case SSA_MUL: return fprintf(to, "%%%hhx:%s = mul %%%hhx, %%%hhx\n", i->to, T, i->L, i->R);
+	case SSA_CONVERT: return fprintf(to, "%%%hhx:%s = %%%hhx:%s\n", i->to, T, i->L, type2s[tinfo[i->L - i->to]->kind]);
 	default:
 		return fprintf(to, "unknown<%hhx %hhx %hhx %hhx>\n", i->kind, i->to, i->L, i->R);
 	}
@@ -200,8 +203,11 @@ case TYPE_NAME:
 	break;
 case TYPE_STRUCT:
 	prn += fprintf(to, "type_struct(");
-	for (decl *field = scratch_start(t->params); field != scratch_end(t->params); field++)
-		fprint_decl(to, field);
+	for (map_entry *e = t->fields.m.addr, *end = t->fields.m.addr + t->fields.m.size;
+			e != end; e++) {
+		if (!e->k) continue;
+		fprint_decl(to, (decl*) (e->v & ~7));
+	}
 	prn += fprintf(to, ")");
 	break;
 default:
@@ -475,6 +481,9 @@ int _print_impl(FILE *to, uint64_t bitmap, ...)
 		break;
 	case P_DECL:
 		printed += fprint_decl(to, va_arg(args, decl*));
+		break;
+	case P_TYPE:
+		printed += fprint_type(to, va_arg(args, type*));
 		break;
 	case P_E2T:
 		global_e2t = va_arg(args, print_acquire_e2t).e2t;

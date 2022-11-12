@@ -162,6 +162,15 @@ expr *parse_expr_postfix(allocator *up)
 		deref->call.args = scratch_from(&indices, ast.temps, up);
 		if (!token_expect(']')) goto err;
 		operand = deref;
+	} else if (token_match('.')) {
+		ident_t name = tokens.current.processed;
+		if (!token_expect(TOKEN_NAME)) goto err;
+		expr *aggr = new_expr(up);
+		aggr->kind = EXPR_FIELD;
+		aggr->pos = token_pos();
+		aggr->field.operand = operand;
+		aggr->field.name = name;
+		operand = aggr;
 	} else break;
 err:
 	return operand;
@@ -350,8 +359,7 @@ type *parse_type(allocator *up)
 	}
 	return t;
 err:
-	t->kind = TYPE_NONE;
-	return t;
+	return &type_none;
 }
 
 stmt_block parse_stmt_block(allocator *up)
@@ -420,16 +428,22 @@ decl_idx parse_decl(allocator *up)
 	if (token_match(':')) { // var decl
 		if (token_match_kw(tokens.kw_struct)) {
 			if (!token_expect('{')) goto err;
-			dyn_arr fields; dyn_arr_init(&fields, 0, ast.temps);
+			map fields;
+			map_init(&fields, 0, ast.temps);
 			while (!token_match('}')) {
 				decl field = parse_decl_unset(up);
 				if (!token_expect(';')) goto err;
-				dyn_arr_push(&fields, &field, sizeof field, ast.temps);
+				bool inserted = false;
+				map_entry *e = map_id(&fields, field.name, intern_hash, intern_cmp, &inserted, ast.temps);
+				if (!expect_or(inserted, field.pos, "trying to add duplicate field to aggregate.\n")) goto err;
+				idx_t id = fields.cnt - 1;
+				assert((id & 7) == id);
+				e->v = (val_t) AST_DUP(up, field) | id;
 			}
 			d->kind = DECL_STRUCT;
 			d->type = new_type(up);
 			d->type->kind = TYPE_STRUCT;
-			d->type->params = scratch_from(&fields, ast.temps, up);
+			d->type->fields = fields;
 			d->type->name = d->name;
 			return pair.i;
 		}
@@ -472,7 +486,7 @@ void test_ast(void)
 	ast_init(gpa);
 	allocator_geom perma;
 	allocator_geom_init(&perma, 16, 8, 0x100, gpa);
-	token_init("nyan/simpler.nyan", ast.temps, &perma.base);
+	token_init("nyan/basic.nyan", ast.temps, &perma.base);
 	module_t module = parse_module(&perma.base);
 	scope global;
 	resolve_refs(module, &global, ast.temps, &perma.base);

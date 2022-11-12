@@ -3,6 +3,13 @@ i2: struct {
 	b: int32;
 }
 
+usei2 func(): int32
+{
+	inst: i2 = undef;
+	inst.b = 256;
+	return 0;
+}
+
 scoping func(): int32
 {
 	a: int32 = 1;

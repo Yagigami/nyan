@@ -117,7 +117,7 @@ again:
 	CASE2('!', '=', TOKEN_NEQ);
 	#undef CASE2
 	case '*': case '&': case '+': case '-': // support += later
-	case '[': case ']': case ',': case ';': case ':': case '(': case ')': case '{': case '}': // always just 1 token
+	case '.': case '[': case ']': case ',': case ';': case ':': case '(': case ')': case '{': case '}': // always just 1 token
 		break;
 	case 'A' ... 'Z': case 'a' ... 'z': case '_':
 		next.kind = TOKEN_NAME;

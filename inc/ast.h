@@ -72,6 +72,7 @@ typedef enum expr_kind {
 	EXPR_DEREF,
 	EXPR_INDEX,
 	EXPR_CONVERT,
+	EXPR_FIELD,
 } expr_kind;
 
 struct expr;
@@ -90,9 +91,10 @@ typedef struct type {
 		// to be honest, types are supposed to be unique
 		// so scratch_arr is just not useful for those
 		// TODO: use dyn_arr instead
-		// decl array // also used for struct
+		// decl array
 		scratch_arr params;
 		scratch_arr sizes; // expr(int) * array
+		map fields; // until map becomes able to handle different size of values, map ident_t -> decl* | (idx_t & 7)
 	};
 	type_kind kind;
 	uint32_t align;
@@ -119,6 +121,10 @@ typedef struct expr {
 			struct expr *operand;
 			type *type;
 		} convert;
+		struct {
+			struct expr *operand;
+			ident_t name;
+		} field;
 	};
 	expr_kind kind;
 	source_idx pos;
@@ -134,7 +140,6 @@ typedef struct decl {
 	union {
 		expr *init;
 		stmt_block body;
-		uint64_t offset; // for aggregate fields
 	};
 } decl;
 

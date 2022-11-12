@@ -188,7 +188,35 @@ static byte *setcc(byte *p, enum x86_64_reg reg, enum ssa_branch_cc cc)
 	return p;
 }
 
+typedef struct field_info {
+	idx_t offset, size;
+} field_info;
+
+typedef struct type_layout {
+	field_info *fields;
+	size_t alloc_size;
+} type_layout;
+
 #define ALIGN(N,A) (((N)+(A)-1)/(A)*(A))
+
+type_layout gen_layout(dyn_arr *num2t, type *back, allocator *a)
+{
+	idx_t n = dyn_arr_size(num2t) / sizeof(type*);
+	allocation m = ALLOC(a, n * sizeof(field_info), alignof(field_info));
+	type_layout l = { m.addr, m.size };
+	type **base = num2t->buf.addr;
+	back->size = 0;
+	back->align = 1;
+	for (idx_t i = 0; i < n; i++) {
+		uint32_t align = base[i]->align;
+		assert(align == 1 || align == 2 || align == 4 || align == 8);
+		back->size = ALIGN(back->size, align);
+		l.fields[i] = (field_info){ back->size, base[i]->size };
+		back->size += base[i]->size;
+		if (align > back->align) back->align = align;
+	}
+	return l;
+}
 
 idx_t *gen_lalloc(dyn_arr *locals, idx_t *out_stack_space, allocation *to_free, allocator *a)
 {
@@ -253,48 +281,58 @@ static byte *lea_rip(byte *p, enum x86_64_reg res, idx_t disp32, int bytes)
 }
 
 // for now, the conversion is done on whatever is in the A register
-static byte *convert(byte *p, type *to, type *from)
+static byte *convert(byte *p, ssa_ref comb)
 {
 	enum x86_64_reg dst = RAX, src = RAX;
-#define COMBINE(TO, FROM) ((TO)+(FROM)*TYPE_NUM)
-	switch (COMBINE(to->kind, from->kind)) {
-	case COMBINE(TYPE_BOOL, TYPE_INT8 ):
-	case COMBINE(TYPE_BOOL, TYPE_INT32):
-	case COMBINE(TYPE_BOOL, TYPE_INT64):
-		p = test(p, RAX, RAX, from->size);
+	switch (comb) {
+	case COMBINE_TYPE(TYPE_BOOL, TYPE_INT8 ):
+		p = test(p, RAX, RAX, 1);
 		p = setcc(p, RAX, SSAB_NE);
 		break;
-	case COMBINE(TYPE_INT8, TYPE_BOOL):
-		// bool is 8 bits so nothing to do here
-	case COMBINE(TYPE_INT8, TYPE_INT32):
-	case COMBINE(TYPE_INT8, TYPE_INT64):
-	case COMBINE(TYPE_INT32, TYPE_INT64):
-		// narrowing conversions are no-ops
+	case COMBINE_TYPE(TYPE_BOOL, TYPE_INT32):
+		p = test(p, RAX, RAX, 4);
+		p = setcc(p, RAX, SSAB_NE);
 		break;
-	case COMBINE(TYPE_INT32, TYPE_BOOL):
+	case COMBINE_TYPE(TYPE_BOOL, TYPE_INT64):
+		p = test(p, RAX, RAX, 8);
+		p = setcc(p, RAX, SSAB_NE);
+		break;
+	case COMBINE_TYPE(TYPE_INT8, TYPE_BOOL):
+		// bool is 8 bits so nothing to do here
+	case COMBINE_TYPE(TYPE_INT8, TYPE_INT32):
+	case COMBINE_TYPE(TYPE_INT8, TYPE_INT64):
+	case COMBINE_TYPE(TYPE_INT32, TYPE_INT64):
+		// narrowing conversions are no-ops
+	case COMBINE_TYPE(TYPE_BOOL, TYPE_BOOL):
+	case COMBINE_TYPE(TYPE_INT8, TYPE_INT8):
+	case COMBINE_TYPE(TYPE_INT32, TYPE_INT32):
+	case COMBINE_TYPE(TYPE_INT64, TYPE_INT64):
+		// self conversions
+		break;
+	case COMBINE_TYPE(TYPE_INT32, TYPE_BOOL):
 		*p++ = 0x0f;
-		*p++ = 0xb6;
+		*p++ = 0xb6; // sus
 		*p++ = modrm(3, src, dst);
 		break;
-	case COMBINE(TYPE_INT32, TYPE_INT8 ):
+	case COMBINE_TYPE(TYPE_INT32, TYPE_INT8 ):
 		*p++ = 0x0f;
 		*p++ = 0xbe;
 		*p++ = modrm(3, src, dst);
 		break;
-	case COMBINE(TYPE_INT64, TYPE_BOOL):
+	case COMBINE_TYPE(TYPE_INT64, TYPE_BOOL):
 		*p++ = rex(1, dst>>3, 0, src>>3);
 		*p++ = 0x0f;
 		*p++ = 0xb6;
 		*p++ = modrm(3, src, dst);
 		break;
-	case COMBINE(TYPE_INT64, TYPE_INT8 ):
+	case COMBINE_TYPE(TYPE_INT64, TYPE_INT8 ):
 		// there is a REX.W, contrary to what the manual says
 		*p++ = rex(1, dst>>3, 0, src>>3);
 		*p++ = 0x0f;
 		*p++ = 0xbe;
 		*p++ = modrm(3, src, dst);
 		break;
-	case COMBINE(TYPE_INT64, TYPE_INT32):
+	case COMBINE_TYPE(TYPE_INT64, TYPE_INT32):
 		*p++ = rex(1, dst>>3, 0, src>>3);
 		*p++ = 0x63;
 		*p++ = modrm(3, src, dst);
@@ -319,6 +357,7 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 	allocation temp_alloc, ta2 = ALLOC(a, src->num_labels * sizeof(idx_t), 4);
 	idx_t *labels = ta2.addr;
 	idx_t stack_space;
+	// TODO: use the layout structure
 	idx_t *locals = gen_lalloc(&src->locals, &stack_space, &temp_alloc, a);
 	type **tinfo = src->locals.buf.addr;
 
@@ -366,9 +405,17 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 			case SSA_COPY:
 				width = tinfo[i->L]->size;
 				p = load_rbprel(p, RAX, locals[i->L], width);
+				// TODO: should be part of 3AC
 				if (tinfo[i->to]->kind != tinfo[i->L]->kind) { // type conversion
-					p = convert(p, tinfo[i->to], tinfo[i->L]);
+					assert(0);
 				}
+				p = store_rbprel(p, RAX, locals[i->to], tinfo[i->to]->size);
+				break;
+
+			case SSA_CONVERT:
+				width = tinfo[i->L]->size;
+				p = load_rbprel(p, RAX, locals[i->L], width);
+				p = convert(p, i->R);
 				p = store_rbprel(p, RAX, locals[i->to], tinfo[i->to]->size);
 				break;
 
@@ -518,10 +565,11 @@ gen_module gen_x86_64(ir3_module m2ac, allocator *a)
 	gen_module out;
 	out.code_size = 0;
 	out.num_refs = 0;
-	dyn_arr dest, refs, rodata, renum;
+	dyn_arr dest, refs, rodata, renum, layouts;
 	dyn_arr_init(&dest, 0*sizeof(gen_sym), a);
 	dyn_arr_init(&refs, 0*sizeof(gen_reloc), a);
 	dyn_arr_init(&renum, 0*sizeof(idx_t), a);
+	dyn_arr_init(&layouts, 0*sizeof(type_layout), a);
 	dyn_arr_init(&rodata, 0, a);
 	idx_t objsym = 1;
 	for (ir3_sym *prev = scratch_start(m2ac), *end = scratch_end(m2ac);
@@ -545,6 +593,8 @@ gen_module gen_x86_64(ir3_module m2ac, allocator *a)
 			out.num_refs  += scratch_len(new->refs) / sizeof(gen_reloc);
 			*idx = objsym++;
 		} else if (prev->kind == IR3_AGGREG) {
+			type_layout l = gen_layout(&prev->fields, prev->back, a);
+			dyn_arr_push(&layouts, &l, sizeof l, a);
 			*idx = -1;
 		} else
 			__builtin_unreachable();
@@ -552,6 +602,7 @@ gen_module gen_x86_64(ir3_module m2ac, allocator *a)
 	out.syms = scratch_from(&dest, a, a);
 	out.rodata = scratch_from(&rodata, a, a);
 	out.renum = scratch_from(&renum, a, a);
+	out.layouts = scratch_from(&layouts, a, a);
 	return out;
 }
 

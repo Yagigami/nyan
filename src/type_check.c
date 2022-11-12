@@ -41,8 +41,11 @@ static bool same_type(const type *L, const type *R)
 		return true;
 	case TYPE_PTR:
 		return same_type(L->base, R->base);
+	case TYPE_STRUCT:
+		// FIXME: is this correct?
+		return L == R;
 	default:
-		__builtin_unreachable();
+		assert(0);
 	}
 }
 
@@ -71,13 +74,9 @@ static bool compatible_type_weak(const type *test, const type *ref, const expr *
 
 static type *type_check_expr(expr **e, scope_iter *stk, type *expecting, value_category c, map *e2t, allocator *up, bool eval);
 
-// FIXME: this function is everywhere -> make that cleaner
-static size_t align(size_t offset, size_t align) { return (offset + align - 1) / align * align; }
-
 void complete_type(type *t, scope_iter *stk, map *e2t, allocator *up)
 {
 	if (t->size != (uint64_t)-1) return;
-	if (!expect_or(t->size != (uint64_t)-2, "<type pos>", "circular dependency in type.\n")) return;
 	switch (t->kind) {
 case TYPE_ARRAY:
 	complete_type(t->base, stk, e2t, up);
@@ -104,22 +103,19 @@ case TYPE_FUNC:
 	break;
 
 case TYPE_STRUCT:
-	{
-	scope_iter top = { .scope=stk->sub, .sub=scratch_start(stk->sub->sub), .next=stk };
-	stk->sub++;
-	t->size = (uint64_t)-2;
-	uint64_t offset = 0;
-	uint32_t alignment = 1;
-	for (decl *field = scratch_start(t->params); field != scratch_end(t->params); field++) {
-		complete_type(field->type, &top, e2t, up);
-		field->offset = offset = align(offset, field->type->align);
-		if (alignment < field->type->align) alignment = field->type->align;
-		offset += field->type->size;
+	t->kind = TYPE_NONE;
+	for (map_entry *e = t->fields.m.addr, *end = t->fields.m.addr + t->fields.m.size;
+			e != end; e++) {
+		if (!e->k) continue;
+		decl *field = (decl*) (e->v & ~7);
+		complete_type(field->type, stk, e2t, up);
 	}
-	t->size = align(offset, alignment);
-	t->align = alignment;
+	t->kind = TYPE_STRUCT;
 	break;
-	}
+
+case TYPE_NONE:
+	expect_or(false, "<type pos>", "attempt to instantiate an incomplete type.");
+	break;
 
 default:
 	__builtin_unreachable();
@@ -340,6 +336,17 @@ case EXPR_DEREF:
 	type *operand = type_check_expr(&e->unary.operand, stk, &type_none, RVALUE, e2t, up, false);
 	if (!expect_or(operand->kind == TYPE_PTR, e->pos, "cannot dereference a non-pointer.\n")) break;
 	t = operand->base;
+	break;
+	}
+
+case EXPR_FIELD:
+	{
+	assert(!eval);
+	type *operand = type_check_expr(&e->field.operand, stk, &type_none, RVALUE, e2t, up, false);
+	if (!expect_or(operand->kind == TYPE_STRUCT, e->pos, "cannot access the field of a non-aggregate object.\n")) break;
+	map_entry *field = map_find(&operand->fields, e->field.name, intern_hash(e->field.name), intern_cmp);
+	if (!expect_or(field, e->pos, "attempt to access a field that does not exist.\n")) break;
+	t = ((decl*) (field->v & ~7))->type;
 	break;
 	}
 
