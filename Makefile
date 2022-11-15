@@ -21,7 +21,7 @@ ifeq ($(DEBUG),1)
 	CFLAGS += -ggdb3 -O0 -fsanitize=undefined,address
 	LDFLAGS += -fsanitize=undefined,address
 else
-	CFLAGS += -O3 -flto -DNDEBUG
+	CFLAGS += -O3 -flto=auto -DNDEBUG
 endif
 
 SRC = $(filter-out $(MAIN),$(shell find src -name "*.c"))

@@ -43,7 +43,7 @@ enum ssa_opcode
 	SSA_STORE, SSA_LOAD,
 	SSA_MUL,
 	SSA_MEMCOPY, // dst = memcpy(src)
-	SSA_OFFSETOF, // to = offsetof(T.L, (T.L).R)
+	SSA_OFFSETOF, // to = offsetof(T.L, .R)
 
 	SSA_NUM
 };

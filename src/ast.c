@@ -429,12 +429,13 @@ decl_idx parse_decl(allocator *up)
 		if (token_match_kw(tokens.kw_struct)) {
 			if (!token_expect('{')) goto err;
 			map fields;
-			map_init(&fields, 0, ast.temps);
+			// shut up leak-san
+			map_init(&fields, 0, up);
 			while (!token_match('}')) {
 				decl field = parse_decl_unset(up);
 				if (!token_expect(';')) goto err;
 				bool inserted = false;
-				map_entry *e = map_id(&fields, field.name, intern_hash, intern_cmp, &inserted, ast.temps);
+				map_entry *e = map_id(&fields, field.name, intern_hash, intern_cmp, &inserted, up);
 				if (!expect_or(inserted, field.pos, "trying to add duplicate field to aggregate.\n")) goto err;
 				idx_t id = fields.cnt - 1;
 				assert((id & 7) == id);

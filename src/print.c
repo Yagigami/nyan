@@ -114,6 +114,7 @@ static int fprint_ir3_instr(FILE *to, const ssa_instr *i, int *extra_offset, con
 	case SSA_ADD: return fprintf(to, "%%%hhx:%s = add %%%hhx, %%%hhx\n", i->to, T, i->L, i->R);
 	case SSA_SUB: return fprintf(to, "%%%hhx:%s = sub %%%hhx, %%%hhx\n", i->to, T, i->L, i->R);
 	case SSA_MUL: return fprintf(to, "%%%hhx:%s = mul %%%hhx, %%%hhx\n", i->to, T, i->L, i->R);
+	case SSA_OFFSETOF: return fprintf(to, "%%%hhx:%s = offsetof sym.%hhx.%hhx\n", i->to, T, i->L, i->R);
 	case SSA_CONVERT: return fprintf(to, "%%%hhx:%s = %%%hhx:%s\n", i->to, T, i->L, type2s[tinfo[i->L - i->to]->kind]);
 	default:
 		return fprintf(to, "unknown<%hhx %hhx %hhx %hhx>\n", i->kind, i->to, i->L, i->R);

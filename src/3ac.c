@@ -185,6 +185,7 @@ case EXPR_CALL:
 	call = dyn_arr_push(&f->ins, m.addr, (void*) instr - m.addr, a);
 	static_assert(((ident_t) -1) < 0, "");
 	if (func < 0) {
+		// TODO: cant this just be inside the func subexpression recursive call (name case)
 		dyn_arr_push(&bytecode.relocs, &(ir3_reloc){ .sym_in=bytecode.cur_idx, .offset_in=(void*) &call[1] - f->ins.buf.addr, .ref=~func }, sizeof(ir3_reloc), a);
 	}
 	DEALLOC(a, m);
@@ -230,6 +231,9 @@ case EXPR_LOG_NOT:
 	break;
 	}
 
+	// I have a feeling that this specific case is a problem
+	// TODO: try just doing the straightforward thing, design SSA_ADDRESS differently
+	// and fusing after the fact addressof(load(*)) -> *
 case EXPR_ADDRESS:
 	{
 	expr *sub = e->unary.operand;
@@ -269,6 +273,8 @@ case EXPR_ADDRESS:
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ADD, number, number, base }, sizeof(ssa_instr), a);
 	} else if (sub->kind == EXPR_DEREF) {
 		number = ir3_expr(f, sub->unary.operand, e2t, stk, REF_NONE, a);
+	} else if (sub->kind == EXPR_FIELD) {
+		assert(0);
 	} else __builtin_unreachable();
 	break;
 	}
@@ -373,10 +379,38 @@ case EXPR_CONVERT:
 	}
 
 case EXPR_FIELD:
+	{
+	// FIXME: this search shouldnt have to be done again
+	type *inner = (type*) map_find(e2t, (key_t) e->field.operand, intern_hash((key_t) e->field.operand), intern_cmp)->v;
+	assert(inner->kind == TYPE_STRUCT);
+	// same issue. maybe ir3_expr should also return the type of the subexpression
+	ident_t name = inner->name;
+	size_t h = intern_hash(name);
+	map_stack *it = stk;
+	map_entry *id;
+	do {
+		id = map_find(&it->ast2num, name, h, intern_cmp);
+		it = it->next;
+	} while (!id); 
+
+	map_entry *field = map_find(&inner->fields, e->field.name, intern_hash(e->field.name), intern_cmp);
+	assert(field);
+
+	// no constant pointer type yet
+	ssa_ref aggr = ir3_expr(f, e->field.operand, e2t, stk, REF_NONE, a);
+	ssa_ref addr = new_local(&f->locals, &type_int64);
+	ssa_ref offs = new_local(&f->locals, &type_int64);
+	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ADDRESS, addr, aggr }, sizeof(ssa_instr), a);
+	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_OFFSETOF, offs, id->v, field->v & 7 }, sizeof(ssa_instr), a);
+	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ADD, addr, addr, offs }, sizeof(ssa_instr), a);
 	if (rvalue == REF_NONE) {
-		assert(0);
+		number = new_local(&f->locals, t);
+		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_LOAD, number, addr }, sizeof(ssa_instr), a);
 	} else {
-		assert(0);
+		number = rvalue;
+		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_STORE, rvalue, addr }, sizeof(ssa_instr), a);
+	}
+	break;
 	}
 
 case EXPR_UNDEF:
@@ -615,6 +649,7 @@ ir3_module convert_to_3ac(module_t ast, scope *enclosing, map *e2t, allocator *a
 			dyn_arr_push(&bytecode.blob, &sym, sizeof sym, bytecode.temps);
 			continue;
 		}
+		// TODO: maybe remove these since they only matter for object code
 		map_entry global = global_name(d->name, ident_len(d->name), a);
 		dyn_arr_push(&bytecode.names, &global, sizeof global, a);
 		assert(d->kind == DECL_FUNC);
@@ -653,6 +688,7 @@ static void ir2_decl_func(ir3_func *dst, ir3_func *src, allocator *a)
 		case SSA_LOAD: case SSA_STORE: case SSA_ADDRESS:
 		case SSA_MEMCOPY:
 		case SSA_CONVERT:
+		case SSA_OFFSETOF:
 			dyn_arr_push(&dst->ins, instr, sizeof *instr, a);
 			break;
 		case SSA_ADD:
@@ -710,6 +746,8 @@ static void ir3_fini(ir3_module m, allocator *a)
 			dyn_arr_fini(&f->f.ins, a);
 			dyn_arr_fini(&f->f.nodes, a);
 			dyn_arr_fini(&f->f.locals, a);
+		} else if (f->kind == IR3_AGGREG) {
+			dyn_arr_fini(&f->fields, a);
 		}
 	}
 	scratch_fini(m, a);

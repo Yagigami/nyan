@@ -347,7 +347,7 @@ static byte *convert(byte *p, ssa_ref comb)
 // FIXME: handle more than 6 args
 static const enum x86_64_reg sysv_arg[6] = { RDI, RSI, RDX, RCX, R8, R9 };
 
-static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
+static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a, idx_t *renum, type_layout *types)
 {
 	dyn_arr ins, refs, label_relocs;
 	dyn_arr_init(&ins, 0, a);
@@ -538,6 +538,15 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a)
 				p = store_rbprel(p, sysv_arg[i->L], locals[i->to], width);
 				break;
 
+			case SSA_OFFSETOF:
+				{
+				field_info *field = &types[renum[i->L]].fields[i->R];
+				width = tinfo[i->to]->size;
+				p = mov_imm(p, RAX, field->offset, width);
+				p = store_rbprel(p, RAX, locals[i->to], width);
+				break;
+				}
+
 			default:
 				assert(0);
 		}
@@ -589,13 +598,13 @@ gen_module gen_x86_64(ir3_module m2ac, allocator *a)
 		} else if (prev->kind == IR3_FUNC) {
 			gen_sym *new = dyn_arr_push(&dest, NULL, sizeof *new, a);
 			new->kind = GEN_CODE;
-			out.code_size += gen_symbol(new, &prev->f, a);
+			out.code_size += gen_symbol(new, &prev->f, a, renum.buf.addr, layouts.buf.addr);
 			out.num_refs  += scratch_len(new->refs) / sizeof(gen_reloc);
 			*idx = objsym++;
 		} else if (prev->kind == IR3_AGGREG) {
 			type_layout l = gen_layout(&prev->fields, prev->back, a);
 			dyn_arr_push(&layouts, &l, sizeof l, a);
-			*idx = -1;
+			*idx = dyn_arr_size(&layouts) / sizeof l - 1;
 		} else
 			__builtin_unreachable();
 	}
@@ -617,5 +626,10 @@ void gen_fini(gen_module *mod, allocator *a)
 	scratch_fini(mod->syms, a);
 	scratch_fini(mod->rodata, a);
 	scratch_fini(mod->renum, a);
+	for (type_layout *l = scratch_start(mod->layouts); l != scratch_end(mod->layouts); l++) {
+		allocation m = { l->fields, l->alloc_size };
+		DEALLOC(a, m);
+	}
+	scratch_fini(mod->layouts, a);
 }
 
