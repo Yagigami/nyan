@@ -10,17 +10,18 @@ case EXPR_NAME:
 	{
 	size_t h = intern_hash(e->name);
 	map_entry *name = map_find(&list->scope->refs, e->name, h, intern_cmp);
-	if (name) return;
+	if (name) goto early;
 	scope_stack_l *it;
 	for (it = list->next; it->next; it = it->next) {
 		name = map_find(&it->scope->refs, e->name, h, intern_cmp);
-		if (name) return;
+		if (name) goto early;
 	}
 	bool inserted = false;
 	// FIXME: to be honest, I feel like global variables should not be order-independent.
 	// functions? sure. aliases? meh. types? i guess.
 	name = map_id(&it->scope->refs, e->name, intern_hash, intern_cmp, &inserted, up);
-	if (inserted) name->v = (val_t) NULL;
+early:
+	e->decl = (decl*) name->v;
 	}
 	break;
 case EXPR_INT:

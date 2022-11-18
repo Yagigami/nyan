@@ -6,6 +6,7 @@
 #include "map.h"
 #include "token.h"
 #include "print.h"
+#include "attrs.h"
 // TODO: remove
 #include "gen/x86-64.h"
 #include "gen/elf64.h"
@@ -16,7 +17,7 @@
 
 typedef struct ir3_reloc {
 	idx_t sym_in, offset_in;
-	ident_t ref;
+	decl *ref;
 } ir3_reloc;
 
 static struct global_bytecode_state_t {
@@ -42,7 +43,6 @@ void bytecode_fini(void)
 }
 
 typedef struct map_stack {
-	map ast2num;
 	scope *scope;
 	struct map_stack *next;
 } map_stack;
@@ -112,7 +112,7 @@ static map_entry global_name(ident_t name, size_t len, allocator *a)
 // rvalue is used in assignment contexts
 // a[1] = b; ---> rvalue = b
 // 12 ---> rvalue = REF_NONE
-static ident_t ir3_expr(ir3_func *f, expr *e, map_stack *stk, ssa_ref rvalue, allocator *a)
+static idx_t ir3_expr(ir3_func *f, expr *e, map_stack *stk, ssa_ref rvalue, allocator *a)
 {
 	switch (e->kind) {
 		ssa_ref number;
@@ -130,38 +130,26 @@ case EXPR_BOOL:
 	return number;
 	
 case EXPR_NAME:
-	{
-	ident_t name = e->name;
-	size_t h = intern_hash(name);
-	map_entry *ent = map_find(&stk->ast2num, name, h, intern_cmp);
-	map_stack *it = stk;
-	while (!ent) {
-		if (it->next) {
-			it = it->next;
-			ent = map_find(&it->ast2num, name, h, intern_cmp);
-		} else {
-			// TODO: find a better way to handle this maybe lol
-			return ~name;
-		}
-	}
-	if (rvalue != REF_NONE)
-		assert(it->next),
-		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_COPY, ent->v, rvalue }, sizeof(ssa_instr), a);
-	number = ent->v;
-	return number;
-	}
+	return e->decl->id;
 
 case EXPR_CALL:
 	{
-	ident_t func = ir3_expr(f, e->call.operand, stk, REF_NONE, a);
+	assert(e->call.operand->type->kind == TYPE_FUNC);
 	idx_t num_args = scratch_len(e->call.args) / sizeof(expr*);
 	assert(num_args < (1L << (8*sizeof(ssa_ref))) - 1);
 	idx_t ratio = sizeof(ssa_extension) / sizeof(ssa_ref);
 	idx_t num_ext = (num_args + ratio - 1) / ratio + 1;
 	allocation m = ALLOC(a, (1 + num_ext) * sizeof(ssa_instr), alignof(ssa_instr));
-	ssa_instr *instr = m.addr, *call=instr;
+	ssa_instr *instr = m.addr;
 	*instr++ = (ssa_instr){ .kind=SSA_CALL, REF_NONE, .R=num_args };
-	(*instr++).v = func;
+#ifndef NDEBUG
+	(*instr++).v = -1;
+#else
+	instr++;
+#endif
+	// since the operand is a function designator, there is nothing to compute
+	// so it's ok to call and then evaluate it
+	ident_t func = ir3_expr(f, e->call.operand, stk, REF_NONE, a);
 	// little endian things
 	ssa_ref buf[ratio];
 	expr **base = scratch_start(e->call.args);
@@ -178,13 +166,13 @@ case EXPR_CALL:
 	if (num_args)
 		memcpy(instr++, buf, sizeof buf);
 	// post after the arguments are evaluated
-	number = call->to = new_local(&f->locals, e->type);
-	call = dyn_arr_push(&f->ins, m.addr, (void*) instr - m.addr, a);
-	static_assert(((ident_t) -1) < 0, "");
-	if (func < 0) {
-		// TODO: cant this just be inside the func subexpression recursive call (name case)
-		dyn_arr_push(&bytecode.relocs, &(ir3_reloc){ .sym_in=bytecode.cur_idx, .offset_in=(void*) &call[1] - f->ins.buf.addr, .ref=~func }, sizeof(ir3_reloc), a);
-	}
+	number = new_local(&f->locals, e->type);
+	ssa_instr *call = dyn_arr_push(&f->ins, m.addr, (void*) instr - m.addr, a);
+	call->to = number;
+	if (func == (idx_t) -1)
+		dyn_arr_push(&bytecode.relocs, &(ir3_reloc){ .sym_in=bytecode.cur_idx, .offset_in=(void*) &call[1] - f->ins.buf.addr, .ref=e->call.operand->decl }, sizeof(ir3_reloc), a);
+	else
+		call[1].v = func;
 	DEALLOC(a, m);
 	return number;
 	}
@@ -269,23 +257,13 @@ case EXPR_ADDRESS:
 	} else if (sub->kind == EXPR_FIELD) {
 		type *inner = sub->field.operand->type;
 		assert(inner->kind == TYPE_STRUCT);
-		// FIXME: annoying to search again
-		ident_t name = inner->name;
-		size_t h = intern_hash(name);
-		map_stack *it = stk;
-		map_entry *id;
-		do {
-			id = map_find(&it->ast2num, name, h, intern_cmp);
-			it = it->next;
-		} while (!id); 
-
 		map_entry *field = map_find(&inner->fields, sub->field.name, intern_hash(sub->field.name), intern_cmp);
 		assert(field);
 		// FIXME: no constant pointer type yet
 		expr aggr = { .kind=EXPR_ADDRESS, .unary = { .operand=sub->field.operand }, .type=&type_int64 };
 		ssa_ref addr = ir3_expr(f, &aggr, stk, REF_NONE, a);
 		ssa_ref offs = new_local(&f->locals, &type_int64);
-		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_OFFSETOF, offs, id->v, field->v & 7 }, sizeof(ssa_instr), a);
+		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_OFFSETOF, offs, inner->id, field->v & 7 }, sizeof(ssa_instr), a);
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ADD, addr, addr, offs }, sizeof(ssa_instr), a);
 		number = addr;
 	} else __builtin_unreachable();
@@ -378,17 +356,14 @@ static void ir3_decl(ir3_func *f, decl_idx i, map_stack *stk, allocator *a)
 case DECL_VAR:
 	{
 	ssa_ref val = ir3_expr(f, d->init, stk, REF_NONE, a);
-	assert(!map_find(&stk->ast2num, d->name, intern_hash(d->name), intern_cmp));
-	map_entry *e = map_add(&stk->ast2num, d->name, intern_hash, a);
-	e->k = d->name;
 	type *init_type = d->init->type;
 	if (d->init->kind == EXPR_NAME) {
 		assert(init_type->kind == d->type->kind);
 		ssa_ref number = new_local(&f->locals, d->type);
-		e->v = number;
+		d->id = number;
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_COPY, number, val }, sizeof(ssa_instr), a);
 	} else {
-		e->v = val;
+		d->id = val;
 	}
 	}
 	break;
@@ -515,11 +490,9 @@ case STMT_BLOCK:
 	{
 	scope *sub = scratch_start(blk[0]->sub);
 	map_stack top = { .scope=(*blk)++, .next=stk };
-	map_init(&top.ast2num, 0, a);
 	for (stmt **iter = scratch_start(s->blk), **end = scratch_end(s->blk); iter != end; iter++) {
 		ir3_stmt(f, *iter, &top, &sub, a);
 	}
-	map_fini(&top.ast2num, a);
 	break;
 	}
 default:
@@ -536,11 +509,8 @@ static void ir3_decl_func(ir3_func *f, decl *d, map_stack *stk, scope** fsc, all
 	dyn_arr_init(&f->locals, 0, a);
 	scope *sub = scratch_start(fsc[0]->sub);
 	map_stack top = { .scope=(*fsc)++, .next=stk };
-	map_init(&top.ast2num, 0, a);
 	for (decl *start = scratch_start(d->type->params), *arg = start; arg != scratch_end(d->type->params); arg++) {
-		map_entry *e = map_add(&top.ast2num, arg->name, intern_hash, a);
-		e->k = arg->name;
-		e->v = arg - start;
+		arg->id = arg - start;
 		new_local(&f->locals, arg->type);
 		// %2 = arg.2
 		// no real constraint for both to be the same
@@ -549,19 +519,18 @@ static void ir3_decl_func(ir3_func *f, decl *d, map_stack *stk, scope** fsc, all
 	for (stmt **iter = scratch_start(d->body), **end = scratch_end(d->body); iter != end; iter++) {
 		ir3_stmt(f, *iter, &top, &sub, a);
 	}
-	map_fini(&top.ast2num, a);
 	ir3_node *last = f->nodes.end - sizeof *last;
 	last->end = dyn_arr_size(&f->ins);
 }
 
-static void patch_relocs(ir3_module mod, map *ast2num)
+static void patch_relocs(ir3_module mod)
 {
 	ir3_sym *base_syms = scratch_start(mod);
 	for (ir3_reloc *reloc = bytecode.relocs.buf.addr; reloc != bytecode.relocs.end; reloc++) {
 		ir3_sym *sym = &base_syms[reloc->sym_in];
-		map_entry *e = map_find(ast2num, reloc->ref, intern_hash(reloc->ref), intern_cmp); assert(e);
 		ssa_instr *ins = sym->f.ins.buf.addr + reloc->offset_in;
-		ins->v = e->v;
+		assert(reloc->ref->id != -1);
+		ins->v = reloc->ref->id;
 	}
 }
 
@@ -572,15 +541,13 @@ static void patch_relocs(ir3_module mod, map *ast2num)
 ir3_module convert_to_3ac(module_t ast, scope *enclosing, allocator *a)
 {
 	map_stack bottom = { .scope=enclosing, .next=NULL };
-	map_init(&bottom.ast2num, 0, a);
 	// TODO: maybe incorporate fsc in the stack
 	scope *fsc = scratch_start(enclosing->sub);
 	for (decl_idx *start = scratch_start(ast), *end = scratch_end(ast),
 			*iter = start; iter != end; iter++) {
 		decl *d = idx2decl(*iter);
-		map_entry *e = map_add(&bottom.ast2num, d->name, intern_hash, a);
-		e->k = d->name;
-		e->v = bytecode.cur_idx = dyn_arr_size(&bytecode.blob) / sizeof(ir3_sym);
+		assert(d->id == -1);
+		d->id = bytecode.cur_idx = dyn_arr_size(&bytecode.blob) / sizeof(ir3_sym);
 		ir3_sym sym;
 		if (d->kind == DECL_STRUCT) {
 			sym.kind = IR3_AGGREG;
@@ -591,6 +558,7 @@ ir3_module convert_to_3ac(module_t ast, scope *enclosing, allocator *a)
 				if (e->k)
 					dyn_arr_push(&sym.fields, NULL, sizeof(type*), a), 
 					base[e->v & 7] = ((decl*) (e->v & ~7))->type;
+			d->type->id = d->id;
 			sym.back = d->type;
 			dyn_arr_push(&bytecode.blob, &sym, sizeof sym, bytecode.temps);
 			continue;
@@ -606,8 +574,7 @@ ir3_module convert_to_3ac(module_t ast, scope *enclosing, allocator *a)
 		// TODO: mmap trickery to reduce the need to copy potentially large amounts of data
 	}
 	ir3_module out = scratch_from(&bytecode.blob, bytecode.temps, a);
-	patch_relocs(out, &bottom.ast2num);
-	map_fini(&bottom.ast2num, a);
+	patch_relocs(out);
 	return out;
 }
 

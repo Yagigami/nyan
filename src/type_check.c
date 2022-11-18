@@ -154,7 +154,8 @@ case EXPR_NAME:
 		stk = stk->next;
 		entry = map_find(&stk->scope->refs, e->name, intern_hash(e->name), intern_cmp);
 	}
-	if (entry) t = ((decl*) entry->v)->type;
+	assert(entry);
+	t = (e->decl = (decl*) entry->v)->type;
 	break;
 	}
 

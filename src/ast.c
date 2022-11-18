@@ -58,6 +58,7 @@ static decl_assoc new_decl(allocator *a, source_idx pos, ident_t name)
 	d->kind = DECL_NONE;
 	d->name = name;
 	d->pos  = pos ;
+	d->id = -1;
 	idx_t i = ast.decls.end - ast.decls.buf.addr;
 	decl_assoc pair = { .ptr=d, .i=i/sizeof(decl*) };
 	dyn_arr_push(&ast.decls, &d, sizeof d, ast.temps);
@@ -93,6 +94,7 @@ static type *new_type(allocator *up)
 {
 	type *t = ALLOC(up, sizeof *t, alignof *t).addr;
 	t->kind = TYPE_NONE;
+	t->id = -1;
 	t->size = -1;
 	return t;
 }
@@ -119,6 +121,7 @@ expr *parse_expr_atom(allocator *up)
 		atom->kind = EXPR_UNDEF;
 	} else if (token_match(TOKEN_NAME)) {
 		atom->kind = EXPR_NAME;
+		atom->decl = NULL;
 		atom->name = snapshot.processed;
 	} else if (token_match(TOKEN_INT)) {
 		atom->kind = EXPR_INT;

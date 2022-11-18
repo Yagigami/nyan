@@ -97,14 +97,19 @@ typedef struct type {
 		map fields; // until map becomes able to handle different size of values, map ident_t -> decl* | (idx_t & 7)
 	};
 	type_kind kind;
+	idx_t id;
 	uint32_t align;
 } type;
 
-// TODO: embed a type* inside or something
+typedef struct decl decl;
+
 typedef struct expr {
 	union {
 		uint64_t value;
-		ident_t name;
+		struct {
+			ident_t name;
+			decl *decl;
+		};
 		struct {
 			struct expr *operand;
 			scratch_arr args; // array of expr*
@@ -133,16 +138,17 @@ typedef struct expr {
 
 typedef scratch_arr stmt_block; // array of stmt*
 
-typedef struct decl {
+struct decl {
 	ident_t name;
 	type *type;
 	decl_kind kind;
 	source_idx pos;
+	idx_t id; // -1 until 3AC conversion
 	union {
 		expr *init;
 		stmt_block body;
 	};
-} decl;
+};
 
 typedef struct stmt {
 	union {
