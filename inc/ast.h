@@ -128,6 +128,7 @@ typedef struct expr {
 	};
 	expr_kind kind;
 	source_idx pos;
+	type *type;
 } expr;
 
 typedef scratch_arr stmt_block; // array of stmt*

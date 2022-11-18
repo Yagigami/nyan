@@ -84,7 +84,7 @@ typedef struct ir3_sym {
 } ir3_sym;
 
 typedef scratch_arr ir3_module;
-ir3_module convert_to_3ac(module_t ast, scope *enclosing, map *e2t, allocator *a);
+ir3_module convert_to_3ac(module_t ast, scope *enclosing, allocator *a);
 ir3_module convert_to_2ac(ir3_module m3ac, allocator *a);
 
 void bytecode_init(allocator *temps);

@@ -72,18 +72,18 @@ static bool compatible_type_weak(const type *test, const type *ref, const expr *
 	return same_type(test, ref);
 }
 
-static type *type_check_expr(expr **e, scope_iter *stk, type *expecting, value_category c, map *e2t, allocator *up, bool eval);
+static type *type_check_expr(expr **e, scope_iter *stk, type *expecting, value_category c, allocator *up, bool eval);
 
-void complete_type(type *t, scope_iter *stk, map *e2t, allocator *up)
+void complete_type(type *t, scope_iter *stk, allocator *up)
 {
 	if (t->size != (uint64_t)-1) return;
 	switch (t->kind) {
 case TYPE_ARRAY:
-	complete_type(t->base, stk, e2t, up);
+	complete_type(t->base, stk, up);
 	t->align = t->base->align;
 	t->size = t->base->size;
 	for (expr **sz = scratch_start(t->sizes); sz != scratch_end(t->sizes); sz++) {
-		type_check_expr(sz, stk, &type_int64, RVALUE, e2t, up, true);
+		type_check_expr(sz, stk, &type_int64, RVALUE, up, true);
 		// FIXME: handle overflow
 		t->size *= sz[0]->value;
 	}
@@ -96,8 +96,8 @@ case TYPE_PTR:
 
 case TYPE_FUNC:
 	for (decl *param = scratch_start(t->params); param != scratch_end(t->params); param++)
-		complete_type(param->type, stk, e2t, up);
-	complete_type(t->base, stk, e2t, up);
+		complete_type(param->type, stk, up);
+	complete_type(t->base, stk, up);
 	t->align = 1;
 	t->size = 0;
 	break;
@@ -108,7 +108,7 @@ case TYPE_STRUCT:
 			e != end; e++) {
 		if (!e->k) continue;
 		decl *field = (decl*) (e->v & ~7);
-		complete_type(field->type, stk, e2t, up);
+		complete_type(field->type, stk, up);
 	}
 	t->kind = TYPE_STRUCT;
 	break;
@@ -122,7 +122,7 @@ default:
 	}
 }
 
-type *type_check_expr(expr **pe, scope_iter *stk, type *expecting, value_category c, map *e2t, allocator *up, bool eval)
+type *type_check_expr(expr **pe, scope_iter *stk, type *expecting, value_category c, allocator *up, bool eval)
 {
 	expr *e = *pe;
 	type *t = &type_none;
@@ -163,23 +163,19 @@ case EXPR_CMP:
 	if (!expect_or(c == RVALUE,
 			e->pos, "cannot assign to the result of binary expression.\n")) break;
 	// TODO: find a way to be less strict about the expected type here
-	type *L = type_check_expr(&e->binary.L, stk, &type_none, RVALUE, e2t, up, eval);
-	type *R = type_check_expr(&e->binary.R, stk, &type_none, RVALUE, e2t, up, eval);
+	type *L = type_check_expr(&e->binary.L, stk, &type_none, RVALUE, up, eval);
+	type *R = type_check_expr(&e->binary.R, stk, &type_none, RVALUE, up, eval);
 	expr *Lv = e->binary.L, *Rv = e->binary.R;
 	expr *smaller_e = Rv;
 	type *bigger = L, *smaller = R;
 	int cmp = L->size - R->size;
 	if (cmp > 0) {
 		smaller_e = Rv = e->binary.R = expr_convert(up, Rv, bigger = L);
-		map_entry *asso = map_add(e2t, (key_t) smaller_e, intern_hash, types.temps);
-		asso->k = (key_t) smaller_e;
-		asso->v = (val_t) bigger;
+		smaller_e->type = bigger;
 		smaller = R;
 	} else if (cmp < 0) {
 		smaller_e = Lv = e->binary.L = expr_convert(up, Lv, bigger = R);
-		map_entry *asso = map_add(e2t, (key_t) smaller_e, intern_hash, types.temps);
-		asso->k = (key_t) smaller_e;
-		asso->v = (val_t) bigger;
+		smaller_e->type = bigger;
 		smaller = L;
 	}
 	if (!expect_or(compatible_type_strong(smaller, bigger, smaller_e),
@@ -228,7 +224,7 @@ case EXPR_INITLIST:
 		idx_t reach = top - stack;
 		expr **sizes = scratch_start(expecting->sizes);
 		if (reach == depth)
-			type_check_expr(peek->at, stk, expecting->base, RVALUE, e2t, up, true);
+			type_check_expr(peek->at, stk, expecting->base, RVALUE, up, true);
 		else if (expect_or(reach < depth && sizes[reach]->kind == EXPR_INT && scratch_len(peek->at[0]->call.args) / sizeof(expr*) == sizes[reach]->value,
 					pe[0]->pos, "attempt to assign a value out of bounds of array"))
 			*top++ = (iter){
@@ -248,7 +244,7 @@ case EXPR_LOG_NOT:
 	{
 	if (!expect_or(c == RVALUE,
 			e->pos, "cannot assign to result of a function call.\n")) break;
-	type *op = type_check_expr(&e->unary.operand, stk, expecting, RVALUE, e2t, up, eval);
+	type *op = type_check_expr(&e->unary.operand, stk, expecting, RVALUE, up, eval);
 	if (!expect_or(same_type(t, &type_bool),
 			e->pos, "cannot find the boolean complement of non-boolean.\n")) break;
 	t = op;
@@ -264,7 +260,7 @@ case EXPR_CALL:
 	{
 	if (!expect_or(!eval, e->pos, "cannot evaluate a function call in a constant expression.\n")) break;
 	if (!expect_or(c == RVALUE, e->pos, "cannot assign to result of a function call.\n")) break;
-	type *operand = type_check_expr(&e->call.operand, stk, &type_none, RVALUE, e2t, up, eval);
+	type *operand = type_check_expr(&e->call.operand, stk, &type_none, RVALUE, up, eval);
 	if (!expect_or(operand->kind == TYPE_FUNC,
 			e->pos, "attempt to call a non-callable:\n")) break;
 	scratch_arr params = operand->params;
@@ -273,7 +269,7 @@ case EXPR_CALL:
 			e->pos, "function call with the wrong number of arguments provided.\n"))
 		break;
 	for (decl *param = scratch_start(params); param != scratch_end(params); param++, arg++)
-		type_check_expr(arg, stk, param->type, RVALUE, e2t, up, eval);
+		type_check_expr(arg, stk, param->type, RVALUE, up, eval);
 	t = operand->base;
 	break;
 	}
@@ -281,8 +277,8 @@ case EXPR_CALL:
 case EXPR_CONVERT:
 	{
 	if (!expect_or(c == RVALUE, e->pos, "cannot assign to the result of a cast expression.\n")) break;
-	type *operand = type_check_expr(&e->convert.operand, stk, &type_none, RVALUE, e2t, up, eval);
-	complete_type(e->convert.type, stk, e2t, up);
+	type *operand = type_check_expr(&e->convert.operand, stk, &type_none, RVALUE, up, eval);
+	complete_type(e->convert.type, stk, up);
 	if (!expect_or(compatible_type_weak(operand, e->convert.type, e->convert.operand),
 				e->pos, "attempt to cast between fully incompatible types.\n")) break;
 	t = e->convert.type;
@@ -305,10 +301,10 @@ case EXPR_ADDRESS:
 	if (!expect_or(c == RVALUE, e->pos, "cannot take the result of an address-of operation as an lvalue.\n")) break;
 	assert(!eval);
 	if (expecting->kind == TYPE_PTR) {
-		type_check_expr(&e->unary.operand, stk, expecting->base, LVALUE, e2t, up, false);
+		type_check_expr(&e->unary.operand, stk, expecting->base, LVALUE, up, false);
 		t = expecting;
 	} else {
-		type *operand = type_check_expr(&e->unary.operand, stk, &type_none, LVALUE, e2t, up, false);
+		type *operand = type_check_expr(&e->unary.operand, stk, &type_none, LVALUE, up, false);
 		t = type_ptr(up, operand);
 	}
 	break;
@@ -317,13 +313,13 @@ case EXPR_INDEX:
 	// LVALUE is ok
 	{
 	if (!expect_or(!eval, e->pos, "cannot evaluate an indexing operation in a constant expression.\n")) break;
-	type *base  = type_check_expr(&e->call.operand, stk, &type_none, RVALUE, e2t, up, eval);
+	type *base  = type_check_expr(&e->call.operand, stk, &type_none, RVALUE, up, eval);
 	if (!expect_or(base->kind == TYPE_ARRAY,
 			e->pos, "attempt to index something that does not support indexing.\n")) break;
 	if (!expect_or(scratch_len(e->call.args) == scratch_len(base->sizes),
 			e->pos, "mismatch between the number of indices and the dimension of the array.\n")) break;
 	for (expr **idx = scratch_start(e->call.args); idx != scratch_end(e->call.args); idx++) {
-		type *ti = type_check_expr(idx, stk, &type_int64, RVALUE, e2t, up, eval);
+		type *ti = type_check_expr(idx, stk, &type_int64, RVALUE, up, eval);
 		assert(ti == &type_int64);
 	}
 	t = base->base;
@@ -333,7 +329,7 @@ case EXPR_INDEX:
 case EXPR_DEREF:
 	{
 	assert(!eval);
-	type *operand = type_check_expr(&e->unary.operand, stk, &type_none, RVALUE, e2t, up, false);
+	type *operand = type_check_expr(&e->unary.operand, stk, &type_none, RVALUE, up, false);
 	if (!expect_or(operand->kind == TYPE_PTR, e->pos, "cannot dereference a non-pointer.\n")) break;
 	t = operand->base;
 	break;
@@ -342,7 +338,7 @@ case EXPR_DEREF:
 case EXPR_FIELD:
 	{
 	assert(!eval);
-	type *operand = type_check_expr(&e->field.operand, stk, &type_none, RVALUE, e2t, up, false);
+	type *operand = type_check_expr(&e->field.operand, stk, &type_none, RVALUE, up, false);
 	if (!expect_or(operand->kind == TYPE_STRUCT, e->pos, "cannot access the field of a non-aggregate object.\n")) break;
 	map_entry *field = map_find(&operand->fields, e->field.name, intern_hash(e->field.name), intern_cmp);
 	if (!expect_or(field, e->pos, "attempt to access a field that does not exist.\n")) break;
@@ -363,82 +359,75 @@ default:
 	expect_or(compatible_type_strong(t, expecting, e),
 			e->pos, "the type of this expression mismatches what is expected here.\n");
 	// since each expression is only created once, pointer equality is enough
-	map_entry *asso = map_add(e2t, (key_t) e, intern_hash, types.temps);
-	asso->k = (key_t) e;
-	asso->v = (val_t) t;
-	complete_type(t, stk, e2t, up);
+	complete_type(t, stk, up);
+	e->type = t;
 	if (!eval && expecting->kind != TYPE_NONE && expecting->kind != t->kind) {
 		e = *pe = expr_convert(up, e, expecting);
-		t = expecting;
-		map_entry *cvt = map_add(e2t, (key_t) e, intern_hash, types.temps);
-		cvt->k = (key_t) e;
-		cvt->v = (val_t) expecting;
+		e->type = t = expecting;
 	}
 	return t;
 }
 
-static void type_check_decl(decl_idx i, scope_iter *stk, map *e2t, allocator *up);
-static void type_check_stmt_block(stmt_block blk, type *surrounding, scope_iter *stk,
-		map *e2t, allocator *up);
+static void type_check_decl(decl_idx i, scope_iter *stk, allocator *up);
+static void type_check_stmt_block(stmt_block blk, type *surrounding, scope_iter *stk, allocator *up);
 
-static void type_check_stmt(stmt *s, type *surrounding, scope_iter *stk,
-		map *e2t, allocator *up)
+static void type_check_stmt(stmt *s, type *surrounding, scope_iter *stk, allocator *up)
 {
 	switch (s->kind) {
 	case STMT_EXPR:
-		type_check_expr(&s->e, stk, &type_none, RVALUE, e2t, up, false);
+		type_check_expr(&s->e, stk, &type_none, RVALUE, up, false);
 		break;
 	case STMT_ASSIGN:
 		type_check_expr(&s->assign.R, stk,
-				type_check_expr(&s->assign.L, stk, &type_none, LVALUE, e2t, up, false),
-				RVALUE, e2t, up, false);
+				type_check_expr(&s->assign.L, stk, &type_none, LVALUE, up, false),
+				RVALUE, up, false);
 		break;
 	case STMT_DECL:
-		type_check_decl(s->d, stk, e2t, up);
+		type_check_decl(s->d, stk, up);
 		break;
 	case STMT_RETURN:
-		type_check_expr(&s->e, stk, surrounding, RVALUE, e2t, up, false);
+		type_check_expr(&s->e, stk, surrounding, RVALUE, up, false);
 		break;
 	case STMT_IFELSE:
-		type_check_expr(&s->ifelse.cond, stk, &type_bool, RVALUE, e2t, up, false);
-		type_check_stmt(s->ifelse.s_then, surrounding, stk, e2t, up);
+		type_check_expr(&s->ifelse.cond, stk, &type_bool, RVALUE, up, false);
+		type_check_stmt(s->ifelse.s_then, surrounding, stk, up);
 		if (s->ifelse.s_else)
-			type_check_stmt(s->ifelse.s_else, surrounding, stk, e2t, up);
+			type_check_stmt(s->ifelse.s_else, surrounding, stk, up);
 		break;
 	case STMT_WHILE:
-		type_check_expr(&s->ifelse.cond, stk, &type_bool, RVALUE, e2t, up, false);
-		type_check_stmt(s->ifelse.s_then, surrounding, stk, e2t, up);
+		type_check_expr(&s->ifelse.cond, stk, &type_bool, RVALUE, up, false);
+		type_check_stmt(s->ifelse.s_then, surrounding, stk, up);
 		break;
 	case STMT_NONE:
 		break;
 	case STMT_BLOCK:
-		type_check_stmt_block(s->blk, surrounding, stk, e2t, up);
+		type_check_stmt_block(s->blk, surrounding, stk, up);
 		break;
 	default:
 		assert(0);
 	}
 }
 
-void type_check_stmt_block(stmt_block blk, type *surrounding, scope_iter *stk, map *e2t, allocator *up)
+void type_check_stmt_block(stmt_block blk, type *surrounding, scope_iter *stk, allocator *up)
 {
 	scope_iter top = { .scope=stk->sub, .sub=scratch_start(stk->sub->sub), .next=stk };
 	for (stmt **it = scratch_start(blk), **end = scratch_end(blk);
 			it != end; it++)
-		type_check_stmt(*it, surrounding, &top, e2t, up);
+		type_check_stmt(*it, surrounding, &top, up);
 	stk->sub++;
 }
 
-void type_check_decl(decl_idx i, scope_iter *stk, map *e2t, allocator *up)
+void type_check_decl(decl_idx i, scope_iter *stk, allocator *up)
 {
 	decl *d = idx2decl(i);
-	complete_type(d->type, stk, e2t, up);
+	complete_type(d->type, stk, up);
 	switch (d->kind) {
 	case DECL_VAR:
-		type_check_expr(&d->init, stk, d->type, RVALUE, e2t, up, false);
+		type_check_expr(&d->init, stk, d->type, RVALUE, up, false);
 		break;
 	case DECL_FUNC:
 		// TODO: not much to do with parameters yet? well at least complete the types...
-		type_check_stmt_block(d->body, d->type->base, stk, e2t, up);
+		type_check_stmt_block(d->body, d->type->base, stk, up);
 		break;
 	case DECL_STRUCT:
 		// no-op // a struct doesnt have runtime expressions for now
@@ -450,14 +439,12 @@ void type_check_decl(decl_idx i, scope_iter *stk, map *e2t, allocator *up)
 	}
 }
 
-void type_check(module_t module, scope *global, map *expr2type, allocator *up)
+void type_check(module_t module, scope *global, allocator *up)
 {
-	map_init(expr2type, 0, types.temps);
 	decl_idx *decl_it = scratch_start(module)  , *decl_end = scratch_end(module);
 	scope_iter bottom = { .scope=global, .sub=scratch_start(global->sub), .next=NULL };
 	for (; decl_it != decl_end; decl_it++)
-		type_check_decl(*decl_it, &bottom, expr2type, up);
-	print(stdout, (print_acquire_e2t){ expr2type });
+		type_check_decl(*decl_it, &bottom, up);
 	ast_dump(module);
 }
 

@@ -75,6 +75,8 @@ static expr *new_expr(allocator *up)
 {
 	expr *e = ALLOC(up, sizeof *e, alignof *e).addr;
 	e->kind = EXPR_NONE;
+	// maybe make it type_none instead
+	e->type = NULL;
 	return e;
 }
 
@@ -491,12 +493,10 @@ void test_ast(void)
 	module_t module = parse_module(&perma.base);
 	scope global;
 	resolve_refs(module, &global, ast.temps, &perma.base);
-	map e2t;
 	type_init(gpa);
-	type_check(module, &global, &e2t, &perma.base);
+	type_check(module, &global, &perma.base);
 	type_fini();
 
-	map_fini(&e2t, gpa);
 	scope_fini(&global, gpa);
 	token_fini();
 	map_fini(&tokens.idents, gpa);

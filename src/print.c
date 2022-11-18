@@ -156,7 +156,6 @@ static int fprint_ir3_func(FILE *to, const ir3_func *f)
 
 static int global_indent;
 static const int indent_width = 2;
-static map *global_e2t;
 
 static int fprint_newline(FILE *to)
 {
@@ -260,10 +259,13 @@ case EXPR_INDEX:
 	prn += fprintf(to, "expr_index(");
 	global_indent += indent_width;
 	prn += fprint_newline(to);
-	prn += fprint_expr(to, e->binary.L);
+	prn += fprint_expr(to, e->call.operand);
 	prn += fprintf(to, ", ");
 	prn += fprint_newline(to);
-	prn += fprint_expr(to, e->binary.R);
+	for (expr **start = scratch_start(e->call.args), **i = start; i != scratch_end(e->call.args); i++) {
+		if (i - start) prn += fprintf(to, ", ");
+		prn += fprint_expr(to, *i);
+	}
 	prn += fprintf(to, ")");
 	global_indent -= indent_width;
 	break;
@@ -331,12 +333,9 @@ default:
 	prn += fprintf(to, "expr_unknown");
 	break;
 	}
-	if (!global_e2t || e->kind == EXPR_CONVERT) return prn;
-	map_entry *assoc = map_find(global_e2t, (key_t) e, intern_hash((key_t) e), intern_cmp);
 	prn += fprintf(to, ": ");
-	if (!assoc) return prn + fprintf(to, "(null)");
-	type *t = (type*) assoc->v;
-	return prn + fprint_type(to, t);
+	if (!e->type) return prn + fprintf(to, "(null)");
+	return prn + fprint_type(to, e->type);
 }
 
 static int fprint_stmt_block(FILE *to, stmt_block blk);
@@ -485,9 +484,6 @@ int _print_impl(FILE *to, uint64_t bitmap, ...)
 		break;
 	case P_TYPE:
 		printed += fprint_type(to, va_arg(args, type*));
-		break;
-	case P_E2T:
-		global_e2t = va_arg(args, print_acquire_e2t).e2t;
 		break;
 	default:
 		__builtin_unreachable();

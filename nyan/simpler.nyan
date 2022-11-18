@@ -1,13 +1,16 @@
 i2: struct {
 	a: int8 ;
 	b: int32;
+	c: int32[3];
 }
 
 usei2 func(): int32
 {
 	inst: i2 = undef;
 	inst.b = 256;
-	return 0;
+	p: int32* = &inst.c[2];
+	*p = 255;
+	return inst.b - *p;
 }
 
 scoping func(): int32
@@ -122,6 +125,7 @@ entry func() : int32
 	p3: int64[4]*** = &p2;
 	ap: int64[4]***[2] = undef;
 	ap[1] = p3;
+	return usei2() - 1;
 	return uses_for(ptr()) - 28;
 	return *rando(**ap[1]): int32;
 	return *rando(&arr3): int32;

@@ -24,7 +24,6 @@ bool expect_or(bool condition, ...);
 
 typedef struct print_int { ptrdiff_t v; } print_int;
 typedef struct print_hex { ptrdiff_t v; } print_hex;
-typedef struct print_acquire_e2t { map *e2t; } print_acquire_e2t;
 
 typedef enum printable {
 	P_STRING,
@@ -51,7 +50,6 @@ static_assert(P_END < (1<<PRINTABLE_SHIFT), "increase PRINTABLE_SHIFT");
 			ir3_func* : P_3AC_FUNC, \
 			decl* : P_DECL, \
 			type* : P_TYPE, \
-			print_acquire_e2t : P_E2T, \
 			token : P_TOKEN, \
 			token_kind : P_TOKEN_KIND \
 			))
