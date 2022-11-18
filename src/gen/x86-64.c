@@ -1,6 +1,7 @@
 #include "gen/x86-64.h"
 #include "type_check.h"
 #include "3ac.h"
+#include "attrs.h"
 
 #include <assert.h>
 #include <stdint.h>
@@ -19,7 +20,7 @@ enum prefix {
 };
 
 static byte modrm(int mod, int rm, int reg) { return mod << 6 | (reg & 7) << 3 | (rm & 7); }
-static byte sib(int ss, int index, int base) { return ss << 6 | (index & 7) << 3 | (base & 7); }
+MAYBE_UNUSED static byte sib(int ss, int index, int base) { return ss << 6 | (index & 7) << 3 | (base & 7); }
 static byte rex(int w, int r, int x, int b) { return REX | w<<3 | r<<2 | x<<1 | b<<0; }
 
 static byte *emit_imm(byte *p, uint64_t i, int bytes)
@@ -150,7 +151,7 @@ static byte *mov(byte *p, enum x86_64_reg L, enum x86_64_reg R, int bytes)
 }
 
 // little endian, just lazy to write 4 imm8 calls
-static byte *endbr64(byte *p) { return emit_imm(p, 0xfa1e0ff3, 4); }
+MAYBE_UNUSED static byte *endbr64(byte *p) { return emit_imm(p, 0xfa1e0ff3, 4); }
 
 static byte *mov_imm(byte *p, enum x86_64_reg r, int64_t imm, int bytes)
 {
@@ -216,28 +217,6 @@ type_layout gen_layout(dyn_arr *num2t, type *back, allocator *a)
 		if (align > back->align) back->align = align;
 	}
 	return l;
-}
-
-idx_t *gen_lalloc(dyn_arr *locals, idx_t *out_stack_space, allocation *to_free, allocator *a)
-{
-	idx_t num_locals = dyn_arr_size(locals) / sizeof(type*);
-	allocation temp_alloc = ALLOC(a, num_locals * sizeof(idx_t), 8);
-	idx_t *local_offsets = temp_alloc.addr;
-	idx_t stack_space = 0;
-
-	type **l = locals->buf.addr;
-	for (idx_t i = 0; i < num_locals; i++) {
-		idx_t align = l[i]->align;
-		assert(align == 1 || align == 2 || align == 4 || align == 8);
-		stack_space = ALIGN(stack_space, align);
-		local_offsets[i] = stack_space;
-		stack_space += l[i]->size;
-	}
-
-	if ((stack_space - 8) & 0xF) stack_space = ALIGN(stack_space-8, 16)+8;
-	*out_stack_space = stack_space;
-	*to_free = temp_alloc;
-	return local_offsets;
 }
 
 static byte *cmp(byte *p, enum x86_64_reg L, enum x86_64_reg R, int bytes)
@@ -354,17 +333,17 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a, idx_t *renum,
 	dyn_arr_init(&refs, 0, a);
 	dyn_arr_init(&label_relocs, 0*sizeof(gen_reloc), a);
 
-	allocation temp_alloc, ta2 = ALLOC(a, src->num_labels * sizeof(idx_t), 4);
-	idx_t *labels = ta2.addr;
-	idx_t stack_space;
+	allocation temp_alloc = ALLOC(a, src->num_labels * sizeof(idx_t), 4);
+	idx_t *labels = temp_alloc.addr;
 	// TODO: use the layout structure
-	idx_t *locals = gen_lalloc(&src->locals, &stack_space, &temp_alloc, a);
-	type **tinfo = src->locals.buf.addr;
+	type frame;
+	type_layout layt = gen_layout(&src->locals, &frame, a);
 
 	byte buf[64], *p = buf;
 	// p = endbr64(p);
 	p = push64(p, RBP);
-	p = addsubimm(p, RSP, stack_space, SSA_SUB, 8);
+	assert(frame.align <= 16);
+	p = addsubimm(p, RSP, frame.size, SSA_SUB, 8);
 	p = mov(p, RBP, RSP, 8);
 	dyn_arr_push(&ins, buf, p-buf, a);
 	for (ssa_instr *start = src->ins.buf.addr, *end = src->ins.end,
@@ -379,18 +358,18 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a, idx_t *renum,
 				break;
 
 			case SSA_SET:
-				width = tinfo[i->L]->size;
-				p = load_rbprel(p, RAX, locals[i->L], width);
-				p = load_rbprel(p, RCX, locals[i->R], width);
+				width = layt.fields[i->L].size;
+				p = load_rbprel(p, RAX, layt.fields[i->L].offset, width);
+				p = load_rbprel(p, RCX, layt.fields[i->R].offset, width);
 				p = cmp(p, RAX, RCX, width);
-				p = setcc_mem(p, locals[i->to], i[1].to);
+				p = setcc_mem(p, layt.fields[i->to].offset, i[1].to);
 				i++;
 				break;
 
 			case SSA_BR:
-				width = tinfo[i->L]->size;
-				p = load_rbprel(p, RAX, locals[i->L], width);
-				p = load_rbprel(p, RCX, locals[i->R], width);
+				width = layt.fields[i->L].size;
+				p = load_rbprel(p, RAX, layt.fields[i->L].offset, width);
+				p = load_rbprel(p, RCX, layt.fields[i->R].offset, width);
 				p = cmp(p, RAX, RCX, width);
 				*p++ = 0x0f;
 				*p++ = 0x80 | bc2cc[i->to];
@@ -403,20 +382,16 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a, idx_t *renum,
 				break;
 
 			case SSA_COPY:
-				width = tinfo[i->L]->size;
-				p = load_rbprel(p, RAX, locals[i->L], width);
-				// TODO: should be part of 3AC
-				if (tinfo[i->to]->kind != tinfo[i->L]->kind) { // type conversion
-					assert(0);
-				}
-				p = store_rbprel(p, RAX, locals[i->to], tinfo[i->to]->size);
+				width = layt.fields[i->L].size;
+				p = load_rbprel(p, RAX, layt.fields[i->L].offset, width);
+				p = store_rbprel(p, RAX, layt.fields[i->to].offset, layt.fields[i->to].size);
 				break;
 
 			case SSA_CONVERT:
-				width = tinfo[i->L]->size;
-				p = load_rbprel(p, RAX, locals[i->L], width);
+				width = layt.fields[i->L].size;
+				p = load_rbprel(p, RAX, layt.fields[i->L].offset, width);
 				p = convert(p, i->R);
-				p = store_rbprel(p, RAX, locals[i->to], tinfo[i->to]->size);
+				p = store_rbprel(p, RAX, layt.fields[i->to].offset, layt.fields[i->to].size);
 				break;
 
 			case SSA_LABEL:
@@ -424,67 +399,67 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a, idx_t *renum,
 				break;
 
 			case SSA_BOOL:
-				p = store_rbprel_imm8(p, locals[i->to], i->L);
+				p = store_rbprel_imm8(p, layt.fields[i->to].offset, i->L);
 				break;
 
 			case SSA_BOOL_NEG:
-				width = tinfo[i->L]->size;
-				p = load_rbprel(p, RDX, locals[i->L], width);
+				width = layt.fields[i->L].size;
+				p = load_rbprel(p, RDX, layt.fields[i->L].offset, width);
 				p = test(p, RDX, RDX, width);
-				p = setcc_mem(p, locals[i->to], SSAB_EQ); // test dl, dl gives ZF iff dl == 0
+				p = setcc_mem(p, layt.fields[i->to].offset, SSAB_EQ); // test dl, dl gives ZF iff dl == 0
 				break;
 
 			case SSA_IMM:
-				width = tinfo[i->to]->size;
+				width = layt.fields[i->to].size;
 				p = mov_imm(p, RAX, i[1].v, width);
-				p = store_rbprel(p, RAX, locals[i->to], width);
+				p = store_rbprel(p, RAX, layt.fields[i->to].offset, width);
 				i++; // because of the extension
 				break;
 				
 			case SSA_ADD: case SSA_SUB:
-				width = tinfo[i->to]->size;
-				p = load_rbprel(p, RAX, locals[i->to], width);
-				p = load_rbprel(p, RDX, locals[i->R ], width);
+				width = layt.fields[i->to].size;
+				p = load_rbprel(p, RAX, layt.fields[i->to].offset, width);
+				p = load_rbprel(p, RDX, layt.fields[i->R ].offset, width);
 				p = addsub(p, RAX, RDX, i->kind, width);
-				p = store_rbprel(p, RAX, locals[i->to], width);
+				p = store_rbprel(p, RAX, layt.fields[i->to].offset, width);
 				break;
 
 			case SSA_MUL:
-				width = tinfo[i->to]->size;
-				p = load_rbprel(p, RAX, locals[i->to], width);
-				p = load_rbprel(p, RCX, locals[i->R ], width);
+				width = layt.fields[i->to].size;
+				p = load_rbprel(p, RAX, layt.fields[i->to].offset, width);
+				p = load_rbprel(p, RCX, layt.fields[i->R ].offset, width);
 				p = umul(p, RCX, width);
-				p = store_rbprel(p, RAX, locals[i->to], width);
+				p = store_rbprel(p, RAX, layt.fields[i->to].offset, width);
 				break;
 
 			case SSA_MEMCOPY:
-				width = tinfo[i->to]->size;
+				width = layt.fields[i->to].size;
 				// slow and dirty repne movsb
-				p = lea(p, RDI, RBP, locals[i->to], 8); // assuming pointers are 8-bytes
-				p = load_rbprel(p, RSI, locals[i->L], 8);
+				p = lea(p, RDI, RBP, layt.fields[i->to].offset, 8); // assuming pointers are 8-bytes
+				p = load_rbprel(p, RSI, layt.fields[i->L].offset, 8);
 				p = mov_imm(p, RCX, width, 8);
 				*p++ = 0xf2;
 				*p++ = 0xa4;
 				break;
 
 			case SSA_ADDRESS:
-				width = tinfo[i->to]->size;
+				width = layt.fields[i->to].size;
 				assert(width == 8);
-				p = lea(p, RAX, RBP, locals[i->L], width);
-				p = store_rbprel(p, RAX, locals[i->to], width);
+				p = lea(p, RAX, RBP, layt.fields[i->L].offset, width);
+				p = store_rbprel(p, RAX, layt.fields[i->to].offset, width);
 				break;
 
 			case SSA_LOAD:
-				width = tinfo[i->to]->size;
-				p = load_rbprel(p, RAX, locals[i->L], 8);
+				width = layt.fields[i->to].size;
+				p = load_rbprel(p, RAX, layt.fields[i->L].offset, 8);
 				p = load(p, RSI, RAX, 0, width);
-				p = store_rbprel(p, RSI, locals[i->to], width);
+				p = store_rbprel(p, RSI, layt.fields[i->to].offset, width);
 				break;
 
 			case SSA_STORE: // .to -> .L
-				width = tinfo[i->to]->size;
-				p = load_rbprel(p, RAX, locals[i->to], width);
-				p = load_rbprel(p, RSI, locals[i->L], 8);
+				width = layt.fields[i->to].size;
+				p = load_rbprel(p, RAX, layt.fields[i->to].offset, width);
+				p = load_rbprel(p, RSI, layt.fields[i->L].offset, 8);
 				p = store(p, RAX, RSI, 0, width);
 				break;
 
@@ -498,52 +473,52 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a, idx_t *renum,
 					ssa_extension ext = i[2 + arg/ratio].v;
 					idx_t shift = 8 * (arg % ratio);
 					ssa_ref id = (ext >> shift) & ((1L << (8 * sizeof id)) - 1);
-					p = load_rbprel(p, sysv_arg[arg], locals[id], tinfo[id]->size);
+					p = load_rbprel(p, sysv_arg[arg], layt.fields[id].offset, layt.fields[id].size);
 				}
 				*p++ = 0xe8;
 				idx_t offset = dyn_arr_size(&ins) + p - buf;
 				gen_reloc r = { offset, i[1].v };
 				dyn_arr_push(&refs, &r, sizeof r, a);
 				p = emit_imm(p, 0, 4);
-				p = store_rbprel(p, RAX, locals[i->to], tinfo[i->to]->size);
+				p = store_rbprel(p, RAX, layt.fields[i->to].offset, layt.fields[i->to].size);
 				i += num_ext;
 				}
 				break;
 
 			case SSA_GLOBAL_REF:
 				{
-				width = tinfo[i->to]->size;
+				width = layt.fields[i->to].size;
 				assert(width == 8);
 				p = lea_rip(p, RAX, 0, width);
 				idx_t offset = dyn_arr_size(&ins) + p - buf - 4;
 				gen_reloc r = { offset, i[1].v };
 				dyn_arr_push(&refs, &r, sizeof r, a);
-				p = store_rbprel(p, RAX, locals[i->to], width);
+				p = store_rbprel(p, RAX, layt.fields[i->to].offset, width);
 				i++;
 				break;
 				}
 
 			case SSA_RET:
-				width = tinfo[i->to]->size;
-				p = load_rbprel(p, RAX, locals[i->to], width);
-				p = addsubimm(p, RSP, stack_space, SSA_ADD, 8);
+				width = layt.fields[i->to].size;
+				p = load_rbprel(p, RAX, layt.fields[i->to].offset, width);
+				p = addsubimm(p, RSP, frame.size, SSA_ADD, 8);
 				p = pop64(p, RBP);
 				*p++ = 0xc3;
 				break;
 
 			case SSA_ARG:
 				assert(i->L < 6);
-				width = tinfo[i->to]->size;
+				width = layt.fields[i->to].size;
 				// sysV abi: int registers rdi>rsi>rdx>rcx>r8>r9
-				p = store_rbprel(p, sysv_arg[i->L], locals[i->to], width);
+				p = store_rbprel(p, sysv_arg[i->L], layt.fields[i->to].offset, width);
 				break;
 
 			case SSA_OFFSETOF:
 				{
 				field_info *field = &types[renum[i->L]].fields[i->R];
-				width = tinfo[i->to]->size;
+				width = layt.fields[i->to].size;
 				p = mov_imm(p, RAX, field->offset, width);
-				p = store_rbprel(p, RAX, locals[i->to], width);
+				p = store_rbprel(p, RAX, layt.fields[i->to].offset, width);
 				break;
 				}
 
@@ -563,7 +538,7 @@ static idx_t gen_symbol(gen_sym *dst, ir3_func *src, allocator *a, idx_t *renum,
 	
 	dyn_arr_fini(&label_relocs, a);
 	DEALLOC(a, temp_alloc);
-	DEALLOC(a, ta2);
+	DEALLOC(a, (allocation){ layt.fields, layt.alloc_size });
 	dst->ins = scratch_from(&ins, a, a);
 	dst->refs = scratch_from(&refs, a, a);
 	return scratch_len(dst->ins);

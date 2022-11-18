@@ -1,5 +1,6 @@
 #include "type_check.h"
 #include "print.h"
+#include "attrs.h"
 
 #include <stdbool.h>
 #include <limits.h>
@@ -64,7 +65,7 @@ static bool compatible_type_strong(const type *test, const type *ref, const expr
 	return same_type(test, ref);
 }
 
-static bool compatible_type_weak(const type *test, const type *ref, const expr *extra)
+static bool compatible_type_weak(const type *test, const type *ref, MAYBE_UNUSED const expr *extra)
 {
 	if (test->kind == TYPE_NONE || ref->kind == TYPE_NONE) return true;
 	if (TYPE_PRIMITIVE_BEGIN <= ref->kind && ref->kind <= TYPE_PRIMITIVE_END)
