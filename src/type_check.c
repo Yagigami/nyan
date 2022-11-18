@@ -108,7 +108,7 @@ case TYPE_STRUCT:
 	for (map_entry *e = t->fields.m.addr, *end = t->fields.m.addr + t->fields.m.size;
 			e != end; e++) {
 		if (!e->k) continue;
-		decl *field = (decl*) (e->v & ~7);
+		decl *field = (decl*) e->v;
 		complete_type(field->type, stk, up);
 	}
 	t->kind = TYPE_STRUCT;
@@ -344,7 +344,7 @@ case EXPR_FIELD:
 	if (!expect_or(operand->kind == TYPE_STRUCT, e->pos, "cannot access the field of a non-aggregate object.\n")) break;
 	map_entry *field = map_find(&operand->fields, e->field.name, intern_hash(e->field.name), intern_cmp);
 	if (!expect_or(field, e->pos, "attempt to access a field that does not exist.\n")) break;
-	t = ((decl*) (field->v & ~7))->type;
+	t = ((decl*) field->v)->type;
 	break;
 	}
 

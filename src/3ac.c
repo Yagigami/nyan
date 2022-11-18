@@ -120,7 +120,7 @@ case EXPR_INT:
 	number = new_local(&f->locals, e->type);
 	assert(e->value <= (ssa_extension)-1);
 	dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_IMM, number }, sizeof(ssa_instr), a);
-	// just little endian things // btw this is undefined behavior
+	// just little endian things
 	dyn_arr_push(&f->ins, &e->value, sizeof(ssa_extension), a);
 	return number;
 
@@ -155,7 +155,7 @@ case EXPR_CALL:
 	expr **base = scratch_start(e->call.args);
 	idx_t arg, idx;
 	for (arg = 0, idx = 0; arg < num_args - ratio; arg++, idx %= ratio) {
-		// FIXME: not giving the right id, either here or in decode
+		// ??? // FIXME: not giving the right id, either here or in decode
 		buf[idx++] = ir3_expr(f, base[arg], stk, REF_NONE, a);
 		if ((arg + ratio - 1) % ratio == 0)
 			memcpy(instr++, buf, sizeof buf);
@@ -263,7 +263,7 @@ case EXPR_ADDRESS:
 		expr aggr = { .kind=EXPR_ADDRESS, .unary = { .operand=sub->field.operand }, .type=&type_int64 };
 		ssa_ref addr = ir3_expr(f, &aggr, stk, REF_NONE, a);
 		ssa_ref offs = new_local(&f->locals, &type_int64);
-		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_OFFSETOF, offs, inner->id, field->v & 7 }, sizeof(ssa_instr), a);
+		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_OFFSETOF, offs, inner->id, ((decl*) field->v)->id }, sizeof(ssa_instr), a);
 		dyn_arr_push(&f->ins, &(ssa_instr){ .kind=SSA_ADD, addr, addr, offs }, sizeof(ssa_instr), a);
 		number = addr;
 	} else __builtin_unreachable();
@@ -555,9 +555,12 @@ ir3_module convert_to_3ac(module_t ast, scope *enclosing, allocator *a)
 			type **base = sym.fields.buf.addr;
 			for (map_entry *e = d->type->fields.m.addr, *end = d->type->fields.m.addr + d->type->fields.m.size;
 					e != end; e++)
-				if (e->k)
-					dyn_arr_push(&sym.fields, NULL, sizeof(type*), a), 
-					base[e->v & 7] = ((decl*) (e->v & ~7))->type;
+				if (e->k) {
+					// does not allocate
+					dyn_arr_push(&sym.fields, NULL, sizeof(type*), a);
+					decl *field = (decl*) e->v;
+					base[field->id] = field->type;
+				}
 			d->type->id = d->id;
 			sym.back = d->type;
 			dyn_arr_push(&bytecode.blob, &sym, sizeof sym, bytecode.temps);

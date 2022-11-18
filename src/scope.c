@@ -116,7 +116,7 @@ case TYPE_STRUCT:
 	for (map_entry *e = t->fields.m.addr, *end = t->fields.m.addr + t->fields.m.size;
 			e != end; e++) {
 		if (!e->k) continue;
-		decl *field = (decl*) (e->v & ~7);
+		decl *field = (decl*) e->v;
 		if (!expect_or(field->kind == DECL_UNSET,
 					field->pos, "can only have a normal variable as an aggregate field.\n")) continue;
 		resolve_type(&field->type, list, up);

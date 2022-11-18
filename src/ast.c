@@ -442,9 +442,8 @@ decl_idx parse_decl(allocator *up)
 				bool inserted = false;
 				map_entry *e = map_id(&fields, field.name, intern_hash, intern_cmp, &inserted, up);
 				if (!expect_or(inserted, field.pos, "trying to add duplicate field to aggregate.\n")) goto err;
-				idx_t id = fields.cnt - 1;
-				assert((id & 7) == id);
-				e->v = (val_t) AST_DUP(up, field) | id;
+				field.id = fields.cnt - 1;
+				e->v = (val_t) AST_DUP(up, field);
 			}
 			d->kind = DECL_STRUCT;
 			d->type = new_type(up);
